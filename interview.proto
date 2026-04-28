@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package interview;
+
+service InterviewAIService {
+  rpc AnalyzeFrame (FrameRequest) returns (AnalysisResponse);
+  rpc AnalyzeFrameStream (stream FrameRequest) returns (stream AnalysisResponse);
+  rpc HealthCheck (HealthRequest) returns (HealthResponse);
+}
+
+message FrameRequest {
+  string session_id = 1;
+  string user_id = 2;
+  bytes image = 3;
+  int64 timestamp = 4;
+}
+
+message BoundingBox {
+  int32 x1 = 1;
+  int32 y1 = 2;
+  int32 x2 = 3;
+  int32 y2 = 4;
+}
+
+message AnalysisResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string label = 3;
+  float confidence = 4;
+  string feedback = 5;
+  int64 timestamp = 6;
+  bool face_detected = 7;
+  BoundingBox bbox = 8;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string model_path = 2;
+}

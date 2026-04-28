@@ -1,7 +1,6 @@
-fastapi
-uvicorn
+grpcio
+grpcio-tools
 opencv-python
 mediapipe>=0.10.13
 numpy
 onnxruntime
-requests
