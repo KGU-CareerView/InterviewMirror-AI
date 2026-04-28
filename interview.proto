@@ -3,16 +3,27 @@ syntax = "proto3";
 package interview;
 
 service InterviewAIService {
-  rpc AnalyzeFrame (FrameRequest) returns (AnalysisResponse);
-  rpc AnalyzeFrameStream (stream FrameRequest) returns (stream AnalysisResponse);
+  rpc AnalyzeFrame (FeatureRequest) returns (AnalysisResponse);
+  rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
 }
 
-message FrameRequest {
+// Client/front에서 MediaPipe + OpenCV 전처리까지 끝낸 뒤,
+// 서버에는 이미지 bytes가 아니라 모델 입력 feature tensor만 보낸다.
+message FeatureRequest {
   string session_id = 1;
   string user_id = 2;
-  bytes image = 3;
-  int64 timestamp = 4;
+
+  // 예: [1, 3, 224, 224]
+  repeated int32 tensor_shape = 3;
+
+  // flatten된 float32 모델 입력값
+  // 예: normalized CHW tensor를 1차원으로 펼친 값
+  repeated float features = 4;
+
+  int64 timestamp = 5;
+  bool face_detected = 6;
+  BoundingBox bbox = 7;
 }
 
 message BoundingBox {
