@@ -50,3 +50,73 @@ message HealthResponse {
   string status = 1;
   string model_path = 2;
 }
+
+syntax = "proto3";
+
+package interview;
+
+service InterviewAIService {
+  rpc AnalyzeFrame (FeatureRequest) returns (AnalysisResponse);
+  rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
+  rpc GenerateSubtitles (SubtitleRequest) returns (SubtitleResponse);
+  rpc HealthCheck (HealthRequest) returns (HealthResponse);
+}
+
+message FeatureRequest {
+  string session_id = 1;
+  string user_id = 2;
+  repeated int32 tensor_shape = 3;
+  repeated float features = 4;
+  int64 timestamp = 5;
+  bool face_detected = 6;
+  BoundingBox bbox = 7;
+}
+
+message BoundingBox {
+  int32 x1 = 1;
+  int32 y1 = 2;
+  int32 x2 = 3;
+  int32 y2 = 4;
+}
+
+message AnalysisResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string label = 3;
+  float confidence = 4;
+  string feedback = 5;
+  int64 timestamp = 6;
+  bool face_detected = 7;
+  BoundingBox bbox = 8;
+}
+
+message SubtitleRequest {
+  string session_id = 1;
+  string user_id = 2;
+  bytes audio = 3;
+  string audio_mime_type = 4;
+  string language_hint = 5;
+}
+
+message SubtitleSegmentMessage {
+  int32 index = 1;
+  int64 start_ms = 2;
+  int64 end_ms = 3;
+  string text = 4;
+}
+
+message SubtitleResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string language = 3;
+  string summary = 4;
+  repeated SubtitleSegmentMessage segments = 5;
+  string srt = 6;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+  string model_path = 2;
+}

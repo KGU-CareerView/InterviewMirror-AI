@@ -10,6 +10,12 @@ import interview_pb2
 import interview_pb2_grpc
 from labels import CLASS_NAMES
 
+import tempfile
+from pathlib import Path
+
+from subtitles.gemini_client import GeminiSubtitleClient
+from subtitles.subtitle_formatter import subtitle_result_to_srt
+
 try:
     import config
 except ImportError:
@@ -52,6 +58,9 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         self.session = ort.InferenceSession(MODEL_PATH)
         self.input_name = self.session.get_inputs()[0].name
 
+        # Gemini 자막 생성 클라이언트
+        self.subtitle_client = GeminiSubtitleClient()
+
     def HealthCheck(self, request, context):
         return interview_pb2.HealthResponse(
             status="ok",
@@ -64,6 +73,62 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
     def AnalyzeFrameStream(self, request_iterator, context):
         for request in request_iterator:
             yield self._analyze(request)
+
+    def GenerateSubtitles(self, request, context):
+        suffix = self._get_audio_suffix(request.audio_mime_type)
+
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
+                temp_audio.write(request.audio)
+                temp_audio_path = Path(temp_audio.name)
+
+            result = self.subtitle_client.generate_subtitles(
+                audio_path=temp_audio_path,
+                language_hint=request.language_hint or "ko-KR",
+            )
+
+            srt = subtitle_result_to_srt(result)
+
+            return interview_pb2.SubtitleResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                language=result.language,
+                summary=result.summary,
+                segments=[
+                    interview_pb2.SubtitleSegmentMessage(
+                        index=segment.index,
+                        start_ms=segment.start_ms,
+                        end_ms=segment.end_ms,
+                        text=segment.text,
+                    )
+                    for segment in result.segments
+                ],
+                srt=srt,
+            )
+
+        except Exception as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Subtitle generation failed: {exc}")
+
+            return interview_pb2.SubtitleResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+            )
+
+        finally:
+            if "temp_audio_path" in locals() and temp_audio_path.exists():
+                temp_audio_path.unlink()
+
+    def _get_audio_suffix(self, audio_mime_type: str) -> str:
+        if audio_mime_type == "audio/mpeg":
+            return ".mp3"
+        if audio_mime_type == "audio/wav":
+            return ".wav"
+        if audio_mime_type == "audio/mp4":
+            return ".m4a"
+        if audio_mime_type == "audio/webm":
+            return ".webm"
+        return ".wav"
 
     def _analyze(self, request):
         if not request.face_detected:
