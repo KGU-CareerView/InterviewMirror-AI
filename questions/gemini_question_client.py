@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 from questions.schemas import (
     FollowUpQuestionGenerateResult,
     InitialQuestionGenerateResult,
+    QuestionItemModel,
 )
 
 load_dotenv()
@@ -20,8 +22,7 @@ class GeminiQuestionClient:
         model: str | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-
+        self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
 
@@ -287,3 +288,7 @@ class GeminiQuestionClient:
             )
 
         return "\n".join(lines) if lines else "이전 면접 흐름 없음"
+
+
+def question_item_to_dict(item: QuestionItemModel) -> dict[str, Any]:
+    return json.loads(item.model_dump_json())
