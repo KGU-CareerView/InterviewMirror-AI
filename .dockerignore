@@ -1,0 +1,15 @@
+.git
+.gitignore
+
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+.env
+.DS_Store
+
+interview_pb2.py
+interview_pb2_grpc.py

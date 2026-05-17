@@ -5,15 +5,18 @@ package interview;
 service InterviewAIService {
   rpc AnalyzeFrame (FeatureRequest) returns (AnalysisResponse);
   rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
-  rpc GenerateSubtitles (SubtitleRequest) returns (SubtitleResponse);
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
+
+  rpc GenerateQuestions (QuestionGenerateRequest) returns (QuestionGenerateResponse);
 }
 
 message FeatureRequest {
   string session_id = 1;
   string user_id = 2;
+
   repeated int32 tensor_shape = 3;
   repeated float features = 4;
+
   int64 timestamp = 5;
   bool face_detected = 6;
   BoundingBox bbox = 7;
@@ -37,33 +40,38 @@ message AnalysisResponse {
   BoundingBox bbox = 8;
 }
 
-message SubtitleRequest {
-  string session_id = 1;
-  string user_id = 2;
-  bytes audio = 3;
-  string audio_mime_type = 4;
-  string language_hint = 5;
-}
-
-message SubtitleSegmentMessage {
-  int32 index = 1;
-  int64 start_ms = 2;
-  int64 end_ms = 3;
-  string text = 4;
-}
-
-message SubtitleResponse {
-  string session_id = 1;
-  string user_id = 2;
-  string language = 3;
-  string summary = 4;
-  repeated SubtitleSegmentMessage segments = 5;
-  string srt = 6;
-}
-
 message HealthRequest {}
 
 message HealthResponse {
   string status = 1;
   string model_path = 2;
+  string question_client_status = 3;
+}
+
+message QuestionGenerateRequest {
+  string session_id = 1;
+  string user_id = 2;
+
+  string job_role = 3;
+  string company_name = 4;
+  string resume_text = 5;
+  string interview_type = 6;
+  int32 question_count = 7;
+  string difficulty = 8;
+  string language = 9;
+}
+
+message QuestionItem {
+  int32 index = 1;
+  string question = 2;
+  string tooltip = 3;
+  string category = 4;
+  string intent = 5;
+  repeated string answer_keywords = 6;
+}
+
+message QuestionGenerateResponse {
+  string session_id = 1;
+  string user_id = 2;
+  repeated QuestionItem questions = 3;
 }
