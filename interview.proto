@@ -5,10 +5,12 @@ package interview;
 service InterviewAIService {
   rpc AnalyzeFrame (FeatureRequest) returns (AnalysisResponse);
   rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
+
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
 
   rpc GenerateInitialQuestions (InitialQuestionGenerateRequest)
       returns (InitialQuestionGenerateResponse);
+
   rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest)
       returns (FollowUpQuestionGenerateResponse);
 }
@@ -16,10 +18,8 @@ service InterviewAIService {
 message FeatureRequest {
   string session_id = 1;
   string user_id = 2;
-
   repeated int32 tensor_shape = 3;
   repeated float features = 4;
-
   int64 timestamp = 5;
   bool face_detected = 6;
   BoundingBox bbox = 7;
@@ -76,7 +76,6 @@ message FollowUpQuestionGenerateRequest {
 
   string previous_question = 3;
   string answer = 4;
-
   string category = 5;
   string interview_type = 6;
   string difficulty = 7;
@@ -105,4 +104,3 @@ message InterviewTurn {
   string question = 2;
   string answer = 3;
 }
-

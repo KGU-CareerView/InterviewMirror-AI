@@ -1,3 +1,1 @@
-"""
-Question generation package.
-"""
+"""Question generation package."""

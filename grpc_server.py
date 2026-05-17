@@ -10,8 +10,6 @@ import interview_pb2
 import interview_pb2_grpc
 from labels import CLASS_NAMES
 
-from gemini_question_client import GeminiQuestionClient
-
 try:
     import config
 except ImportError:
@@ -57,13 +55,10 @@ DEFAULT_TENSOR_SHAPE = [1, 3, DEFAULT_INPUT_SIZE, DEFAULT_INPUT_SIZE]
 
 
 class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
-    
     def __init__(self):
-        self.question_client = GeminiQuestionClient()
         print(f"[INFO] Loading ONNX model: {MODEL_PATH}")
         self.session = ort.InferenceSession(MODEL_PATH)
         self.input_name = self.session.get_inputs()[0].name
-
         self.question_client = self._init_question_client()
 
     def _init_question_client(self):
@@ -95,58 +90,108 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         for request in request_iterator:
             yield self._analyze(request)
 
-    def GenerateQuestions(self, request, context):
+    def GenerateInitialQuestions(self, request, context):
         if self.question_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
             context.set_details(
                 "Question generation is disabled. "
                 "Set GEMINI_API_KEY and install google-genai, python-dotenv, pydantic."
             )
-
-            return interview_pb2.QuestionGenerateResponse(
+            return interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 questions=[],
             )
 
         try:
-            result = self.question_client.generate_questions_with_tooltips(
-                job_role=request.job_role,
-                company_name=request.company_name,
-                resume_text=request.resume_text,
+            result = self.question_client.generate_initial_questions(
+                category=request.category,
                 interview_type=request.interview_type,
-                question_count=request.question_count,
                 difficulty=request.difficulty,
+                question_count=request.question_count,
+                time_per_question=request.time_per_question,
+                resume_text=request.resume_text,
                 language=request.language,
             )
 
-            return interview_pb2.QuestionGenerateResponse(
+            return interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 questions=[
-                    interview_pb2.QuestionItem(
-                        index=item.index,
-                        question=item.question,
-                        tooltip=item.tooltip,
-                        category=item.category,
-                        intent=item.intent,
-                        answer_keywords=item.answer_keywords,
-                    )
+                    self._to_proto_question_item(item)
                     for item in result.questions
                 ],
             )
 
         except Exception as exc:
+            print(f"[ERROR] Initial question generation failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Question generation failed: {exc}")
+            context.set_details(f"Initial question generation failed: {exc}")
 
-            return interview_pb2.QuestionGenerateResponse(
+            return interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 questions=[],
             )
-        
-        
+
+    def GenerateFollowUpQuestion(self, request, context):
+        if self.question_client is None:
+            context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+            context.set_details(
+                "Question generation is disabled. "
+                "Set GEMINI_API_KEY and install google-genai, python-dotenv, pydantic."
+            )
+            return interview_pb2.FollowUpQuestionGenerateResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+            )
+
+        try:
+            history = [
+                {
+                    "index": turn.index,
+                    "question": turn.question,
+                    "answer": turn.answer,
+                }
+                for turn in request.history
+            ]
+
+            result = self.question_client.generate_follow_up_question(
+                previous_question=request.previous_question,
+                answer=request.answer,
+                category=request.category,
+                interview_type=request.interview_type,
+                difficulty=request.difficulty,
+                resume_text=request.resume_text,
+                history=history,
+                language=request.language,
+            )
+
+            return interview_pb2.FollowUpQuestionGenerateResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                question=self._to_proto_question_item(result.question),
+            )
+
+        except Exception as exc:
+            print(f"[ERROR] Follow-up question generation failed: {exc}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Follow-up question generation failed: {exc}")
+
+            return interview_pb2.FollowUpQuestionGenerateResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+            )
+
+    def _to_proto_question_item(self, item):
+        return interview_pb2.QuestionItem(
+            index=item.index,
+            question=item.question,
+            tooltip=item.tooltip,
+            category=item.category,
+            intent=item.intent,
+            answer_keywords=item.answer_keywords,
+        )
 
     def _analyze(self, request):
         if not request.face_detected:
@@ -158,6 +203,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 feedback="얼굴이 감지되지 않았습니다. 카메라 정면을 바라봐 주세요.",
                 timestamp=request.timestamp,
                 face_detected=False,
+                bbox=request.bbox,
             )
 
         if not request.features:
@@ -175,11 +221,12 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             return self._error_response(request, feedback=str(exc))
 
         outputs = self.session.run(None, {self.input_name: input_tensor})
+
         logits = outputs[0]
         probs = self._softmax(logits[0])
-
         pred_idx = int(np.argmax(probs))
         confidence = float(probs[pred_idx])
+
         label = CLASS_NAMES[pred_idx] if pred_idx < len(CLASS_NAMES) else str(pred_idx)
 
         return interview_pb2.AnalysisResponse(
@@ -199,7 +246,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
         if len(features) != expected_size:
             raise ValueError(
-                f"feature 개수와 tensor_shape가 맞지 않습니다. "
+                "feature 개수와 tensor_shape가 맞지 않습니다. "
                 f"features={len(features)}, shape={shape}, expected={expected_size}"
             )
 
@@ -209,7 +256,6 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         logits = logits.astype(np.float32)
         logits = logits - np.max(logits)
         exp = np.exp(logits)
-
         return exp / np.sum(exp)
 
     def _make_feedback(self, label: str, confidence: float) -> str:
@@ -233,6 +279,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             feedback=feedback,
             timestamp=request.timestamp,
             face_detected=False,
+            bbox=request.bbox,
         )
 
 
@@ -249,7 +296,8 @@ def serve():
 
     print("[gRPC Server] Interview AI gRPC server started on port 50051")
     print("[gRPC Server] Server receives features only. No image bytes / MediaPipe / OpenCV processing here.")
-    print("[gRPC Server] GenerateQuestions RPC is available.")
+    print("[gRPC Server] GenerateInitialQuestions RPC is available.")
+    print("[gRPC Server] GenerateFollowUpQuestion RPC is available.")
 
     try:
         while True:
@@ -261,76 +309,3 @@ def serve():
 
 if __name__ == "__main__":
     serve()
-def GenerateInitialQuestion(self, request, context):
-    try:
-        questions = self.question_client.generate_initial_questions(
-            job_position=request.job_position,
-            company_name=request.company_name,
-            interview_type=request.interview_type,
-            difficulty=request.difficulty or "normal",
-            resume_text=request.resume_text,
-            portfolio_text=request.portfolio_text,
-            keywords=list(request.keywords),
-            question_count=request.question_count or 3,
-        )
-
-        return interview_pb2.QuestionResponse(
-            session_id=request.session_id,
-            user_id=request.user_id,
-            questions=[
-                interview_pb2.QuestionItem(
-                    index=int(item.get("index", idx + 1)),
-                    question=str(item.get("question", "")),
-                    intent=str(item.get("intent", "")),
-                    category=str(item.get("category", "initial")),
-                )
-                for idx, item in enumerate(questions)
-            ],
-        )
-
-    except Exception as exc:
-        print(f"[ERROR] Initial question generation failed: {exc}")
-        context.set_code(grpc.StatusCode.INTERNAL)
-        context.set_details(f"Initial question generation failed: {exc}")
-        return interview_pb2.QuestionResponse(
-            session_id=request.session_id,
-            user_id=request.user_id,
-        )
-
-
-def GenerateFollowUpQuestion(self, request, context):
-    try:
-        questions = self.question_client.generate_follow_up_questions(
-            job_position=request.job_position,
-            company_name=request.company_name,
-            interview_type=request.interview_type,
-            difficulty=request.difficulty or "normal",
-            previous_question=request.previous_question,
-            user_answer=request.user_answer,
-            answer_summary=request.answer_summary,
-            keywords=list(request.keywords),
-            question_count=request.question_count or 2,
-        )
-
-        return interview_pb2.QuestionResponse(
-            session_id=request.session_id,
-            user_id=request.user_id,
-            questions=[
-                interview_pb2.QuestionItem(
-                    index=int(item.get("index", idx + 1)),
-                    question=str(item.get("question", "")),
-                    intent=str(item.get("intent", "")),
-                    category=str(item.get("category", "follow_up")),
-                )
-                for idx, item in enumerate(questions)
-            ],
-        )
-
-    except Exception as exc:
-        print(f"[ERROR] Follow-up question generation failed: {exc}")
-        context.set_code(grpc.StatusCode.INTERNAL)
-        context.set_details(f"Follow-up question generation failed: {exc}")
-        return interview_pb2.QuestionResponse(
-            session_id=request.session_id,
-            user_id=request.user_id,
-        )
