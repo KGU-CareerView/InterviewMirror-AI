@@ -1,3 +1,4 @@
+cat > interview.proto <<'EOF'
 syntax = "proto3";
 
 package interview;
@@ -75,3 +76,4 @@ message QuestionGenerateResponse {
   string user_id = 2;
   repeated QuestionItem questions = 3;
 }
+EOF

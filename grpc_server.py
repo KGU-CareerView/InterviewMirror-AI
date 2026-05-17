@@ -1,4 +1,3 @@
-cat > grpc_server.py <<'EOF'
 import os
 import time
 from concurrent import futures
@@ -31,7 +30,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def resolve_path(filename: str) -> str:
     if os.path.isabs(filename):
         return filename
-
     return os.path.join(BASE_DIR, filename)
 
 
@@ -98,7 +96,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
             context.set_details(
                 "Question generation is disabled. "
-                "Check GEMINI_API_KEY, google-genai, python-dotenv, and pydantic installation."
+                "Set GEMINI_API_KEY and install google-genai, python-dotenv, pydantic."
             )
 
             return interview_pb2.QuestionGenerateResponse(
@@ -257,4 +255,3 @@ def serve():
 
 if __name__ == "__main__":
     serve()
-EOF

@@ -1,2 +1,8 @@
-.DS_STORE
-
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+interview_pb2.py
+interview_pb2_grpc.py
