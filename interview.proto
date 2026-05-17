@@ -1,4 +1,3 @@
-cat > interview.proto <<'EOF'
 syntax = "proto3";
 
 package interview;
@@ -8,7 +7,10 @@ service InterviewAIService {
   rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
 
-  rpc GenerateQuestions (QuestionGenerateRequest) returns (QuestionGenerateResponse);
+  rpc GenerateInitialQuestions (InitialQuestionGenerateRequest)
+      returns (InitialQuestionGenerateResponse);
+  rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest)
+      returns (FollowUpQuestionGenerateResponse);
 }
 
 message FeatureRequest {
@@ -49,17 +51,44 @@ message HealthResponse {
   string question_client_status = 3;
 }
 
-message QuestionGenerateRequest {
+message InitialQuestionGenerateRequest {
   string session_id = 1;
   string user_id = 2;
 
-  string job_role = 3;
-  string company_name = 4;
-  string resume_text = 5;
-  string interview_type = 6;
-  int32 question_count = 7;
-  string difficulty = 8;
+  string category = 3;
+  string interview_type = 4;
+  string difficulty = 5;
+  int32 question_count = 6;
+  int32 time_per_question = 7;
+  string resume_text = 8;
   string language = 9;
+}
+
+message InitialQuestionGenerateResponse {
+  string session_id = 1;
+  string user_id = 2;
+  repeated QuestionItem questions = 3;
+}
+
+message FollowUpQuestionGenerateRequest {
+  string session_id = 1;
+  string user_id = 2;
+
+  string previous_question = 3;
+  string answer = 4;
+
+  string category = 5;
+  string interview_type = 6;
+  string difficulty = 7;
+  string resume_text = 8;
+  repeated InterviewTurn history = 9;
+  string language = 10;
+}
+
+message FollowUpQuestionGenerateResponse {
+  string session_id = 1;
+  string user_id = 2;
+  QuestionItem question = 3;
 }
 
 message QuestionItem {
@@ -71,9 +100,9 @@ message QuestionItem {
   repeated string answer_keywords = 6;
 }
 
-message QuestionGenerateResponse {
-  string session_id = 1;
-  string user_id = 2;
-  repeated QuestionItem questions = 3;
+message InterviewTurn {
+  int32 index = 1;
+  string question = 2;
+  string answer = 3;
 }
-EOF
+
