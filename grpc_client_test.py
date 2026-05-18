@@ -1,76 +1,40 @@
 import time
-import threading
 
-import cv2
 import grpc
+import numpy as np
 
 import interview_pb2
 import interview_pb2_grpc
 
 
-def request_generator(cap):
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        ok, buffer = cv2.imencode(".jpg", frame)
-        if not ok:
-            continue
-
-        yield interview_pb2.FrameRequest(
-            session_id="test-session-001",
-            user_id="test-user-001",
-            image=buffer.tobytes(),
-            timestamp=int(time.time() * 1000),
-        )
-
-
-def receive_responses(responses):
-    for response in responses:
-        print(
-            f"label={response.label}, "
-            f"confidence={response.confidence:.4f}, "
-            f"feedback={response.feedback}"
-        )
+def make_dummy_request():
+    shape = [1, 3, 224, 224]
+    features = np.zeros(shape, dtype=np.float32).reshape(-1).tolist()
+    return interview_pb2.FeatureRequest(
+        session_id="test-session-001",
+        user_id="test-user-001",
+        tensor_shape=shape,
+        features=features,
+        timestamp=int(time.time() * 1000),
+        face_detected=True,
+        bbox=interview_pb2.BoundingBox(x1=0, y1=0, x2=224, y2=224),
+    )
 
 
 def main():
     channel = grpc.insecure_channel("127.0.0.1:50051")
     stub = interview_pb2_grpc.InterviewAIServiceStub(channel)
 
-    # health check
     health = stub.HealthCheck(interview_pb2.HealthRequest())
-    print("[HEALTH]", health.status, health.model_path)
+    print("[HEALTH]", health.status)
+    print("[MODEL]", health.model_path)
+    print("[QUESTION CLIENT]", health.question_client_status)
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("[ERROR] Webcam open failed")
-        return
-
-    print("[INFO] Streaming started (press q to quit)")
-
-    # 🔥 streaming 시작
-    responses = stub.AnalyzeFrameStream(request_generator(cap))
-
-    # 응답 처리 스레드
-    t = threading.Thread(target=receive_responses, args=(responses,))
-    t.daemon = True
-    t.start()
-
-    # 화면 출력 루프
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        cv2.imshow("gRPC Client Streaming", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    response = stub.AnalyzeFrame(make_dummy_request())
+    print("[ANALYSIS]")
+    print("label=", response.label)
+    print("confidence=", response.confidence)
+    print("feedback=", response.feedback)
 
 
 if __name__ == "__main__":
