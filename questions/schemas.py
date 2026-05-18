@@ -5,11 +5,9 @@ class QuestionItemModel(BaseModel):
     index: int = Field(description="Question index starting from 1.")
     question: str = Field(description="Generated interview question.")
     tooltip: str = Field(description="Short helpful tooltip for answering the question.")
-    category: str = Field(description="Question category.")
+    category: str = Field(description="Question category, such as personality, technical, project, or follow-up.")
     intent: str = Field(description="Why this question is being asked.")
-    answer_keywords: list[str] = Field(
-        description="Useful keywords or points the interviewee should include."
-    )
+    answer_keywords: list[str] = Field(description="Useful keywords or points the interviewee should include.")
 
     @field_validator("question", "tooltip", "category", "intent")
     @classmethod
@@ -34,10 +32,8 @@ class QuestionItemModel(BaseModel):
         return self
 
 
-class InitialQuestionGenerateResult(BaseModel):
-    questions: list[QuestionItemModel] = Field(
-        description="Generated initial interview questions with tooltips."
-    )
+class QuestionGenerateResult(BaseModel):
+    questions: list[QuestionItemModel] = Field(description="Generated interview questions with tooltips.")
 
     @field_validator("questions")
     @classmethod
@@ -45,9 +41,3 @@ class InitialQuestionGenerateResult(BaseModel):
         if not value:
             raise ValueError("questions must not be empty.")
         return value
-
-
-class FollowUpQuestionGenerateResult(BaseModel):
-    question: QuestionItemModel = Field(
-        description="Generated follow-up interview question based on the user's answer."
-    )
