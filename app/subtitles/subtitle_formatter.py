@@ -14,7 +14,8 @@ def milliseconds_to_srt_time(milliseconds: int) -> str:
     return f"{hours:02}:{minutes:02}:{seconds:02},{milliseconds:03}"
 
 
-def subtitle_result_to_srt(result: SubtitleResult) -> str:
+def subtitle_result_to_srt(result:
+                            SubtitleResult) -> str:
     blocks: list[str] = []
 
     for segment in result.segments:

@@ -5,9 +5,14 @@ package interview;
 service InterviewAIService {
   rpc AnalyzeFrame (FeatureRequest) returns (AnalysisResponse);
   rpc AnalyzeFrameStream (stream FeatureRequest) returns (stream AnalysisResponse);
+
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
-  rpc GenerateInitialQuestions (InitialQuestionGenerateRequest) returns (InitialQuestionGenerateResponse);
-  rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest) returns (FollowUpQuestionGenerateResponse);
+
+  rpc GenerateInitialQuestions (InitialQuestionGenerateRequest)
+      returns (InitialQuestionGenerateResponse);
+
+  rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest)
+      returns (FollowUpQuestionGenerateResponse);
 }
 
 message FeatureRequest {
@@ -49,6 +54,7 @@ message HealthResponse {
 message InitialQuestionGenerateRequest {
   string session_id = 1;
   string user_id = 2;
+
   string category = 3;
   string interview_type = 4;
   string difficulty = 5;
@@ -67,6 +73,7 @@ message InitialQuestionGenerateResponse {
 message FollowUpQuestionGenerateRequest {
   string session_id = 1;
   string user_id = 2;
+
   string previous_question = 3;
   string answer = 4;
   string category = 5;

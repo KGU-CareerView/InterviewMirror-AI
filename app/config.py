@@ -1,4 +1,4 @@
-MODEL_PATH = "emotion_model.onnx"
+MODEL_PATH = "interview_model_v3.onnx"
 MEDIAPIPE_FACE_TASK_MODEL = "face_detector.task"
 
 CAMERA_INDEX = 0

@@ -24,6 +24,7 @@ gRPC 기반 AI 서버 연동 경험이 있습니다.
     )
 
     print("\n========== INITIAL QUESTIONS ==========")
+
     for item in response.questions:
         print("=" * 60)
         print(f"[{item.index}] {item.question}")
@@ -46,7 +47,11 @@ REST API보다 실시간 스트리밍에 유리하다고 판단해서 gRPC를 �
             category="백엔드",
             interview_type="기술 면접",
             difficulty="normal",
-            resume_text="Spring Boot와 MySQL을 활용해 게시판 프로젝트를 구현했습니다.",
+            resume_text="""
+Spring Boot와 MySQL을 활용해 게시판 프로젝트를 구현했습니다.
+JWT 기반 로그인, 게시글 CRUD, 댓글 기능, 파일 업로드 기능을 맡았습니다.
+gRPC 기반 AI 서버 연동 경험이 있습니다.
+""",
             history=[
                 interview_pb2.InterviewTurn(
                     index=1,
@@ -59,6 +64,7 @@ REST API보다 실시간 스트리밍에 유리하다고 판단해서 gRPC를 �
     )
 
     item = response.question
+
     print("\n========== FOLLOW-UP QUESTION ==========")
     print("=" * 60)
     print(f"[{item.index}] {item.question}")
@@ -73,6 +79,7 @@ def main():
     stub = interview_pb2_grpc.InterviewAIServiceStub(channel)
 
     health = stub.HealthCheck(interview_pb2.HealthRequest())
+
     print("[HEALTH]", health.status)
     print("[MODEL]", health.model_path)
     print("[QUESTION CLIENT]", health.question_client_status)

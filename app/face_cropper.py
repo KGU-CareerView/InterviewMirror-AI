@@ -9,17 +9,19 @@ class FaceCropper:
         self,
         model_path="face_detector.task",
         min_detection_confidence=0.6,
-        bbox_margin=0.25
+        bbox_margin=0.25,
     ):
         self.min_detection_confidence = min_detection_confidence
         self.bbox_margin = bbox_margin
 
         base_options = python.BaseOptions(model_asset_path=model_path)
+
         options = vision.FaceDetectorOptions(
             base_options=base_options,
             running_mode=vision.RunningMode.IMAGE,
-            min_detection_confidence=self.min_detection_confidence
+            min_detection_confidence=self.min_detection_confidence,
         )
+
         self.detector = vision.FaceDetector.create_from_options(options)
 
     def _expand_bbox(self, x, y, w, h, img_w, img_h):
@@ -35,11 +37,12 @@ class FaceCropper:
 
     def get_largest_face(self, frame_bgr):
         img_h, img_w, _ = frame_bgr.shape
+
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
         mp_image = mp.Image(
             image_format=mp.ImageFormat.SRGB,
-            data=frame_rgb
+            data=frame_rgb,
         )
 
         detection_result = self.detector.detect(mp_image)
@@ -61,6 +64,7 @@ class FaceCropper:
             x1, y1, x2, y2 = self._expand_bbox(x, y, w, h, img_w, img_h)
 
             area = (x2 - x1) * (y2 - y1)
+
             if area > best_area:
                 best_area = area
                 best_bbox = (x1, y1, x2, y2)
