@@ -19,7 +19,11 @@ INPUT_SIZE = getattr(config, "INPUT_SIZE", 224)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FACE_DETECTOR_MODEL_PATH = Path(
-    getattr(config, "MEDIAPIPE_FACE_TASK_MODEL", BASE_DIR / "models" / "face_detector.task")
+    getattr(
+        config,
+        "MEDIAPIPE_FACE_TASK_MODEL",
+        BASE_DIR / "models" / "face_detector.task",
+    )
 )
 
 MEAN = np.array(getattr(config, "MEAN", [0.485, 0.456, 0.406]), dtype=np.float32)
@@ -28,9 +32,13 @@ STD = np.array(getattr(config, "STD", [0.229, 0.224, 0.225]), dtype=np.float32)
 
 def create_face_detector():
     if not FACE_DETECTOR_MODEL_PATH.exists():
-        raise FileNotFoundError(f"MediaPipe face detector model not found: {FACE_DETECTOR_MODEL_PATH}")
+        raise FileNotFoundError(
+            f"MediaPipe face detector model not found: {FACE_DETECTOR_MODEL_PATH}"
+        )
 
-    base_options = python.BaseOptions(model_asset_path=str(FACE_DETECTOR_MODEL_PATH))
+    base_options = python.BaseOptions(
+        model_asset_path=str(FACE_DETECTOR_MODEL_PATH)
+    )
 
     options = vision.FaceDetectorOptions(
         base_options=base_options,
@@ -42,10 +50,6 @@ def create_face_detector():
 
 
 def detect_face_bbox_with_mediapipe(detector, frame_bgr):
-    """
-    MediaPipe FaceDetector로 얼굴 bbox 검출.
-    return: (x1, y1, x2, y2) or None
-    """
     rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
@@ -56,10 +60,11 @@ def detect_face_bbox_with_mediapipe(detector, frame_bgr):
 
     frame_h, frame_w = frame_bgr.shape[:2]
 
-    # 가장 큰 얼굴 선택
     best_detection = max(
         detection_result.detections,
-        key=lambda d: d.bounding_box.width * d.bounding_box.height,
+        key=lambda detection: (
+            detection.bounding_box.width * detection.bounding_box.height
+        ),
     )
 
     bbox = best_detection.bounding_box
@@ -85,9 +90,6 @@ def detect_face_bbox_with_mediapipe(detector, frame_bgr):
 
 
 def preprocess_face(face_bgr):
-    """
-    BGR face image -> NCHW float32 tensor
-    """
     resized = cv2.resize(face_bgr, (INPUT_SIZE, INPUT_SIZE))
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
@@ -169,6 +171,7 @@ def main():
     except grpc.RpcError as exc:
         print("[ERROR] gRPC server is not running.")
         print(exc.code(), exc.details())
+        detector.close()
         return
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
@@ -176,6 +179,7 @@ def main():
     if not cap.isOpened():
         print(f"[ERROR] Cannot open camera index {CAMERA_INDEX}")
         print("Mac 설정 > 개인정보 보호 및 보안 > 카메라에서 터미널/VSCode 권한 확인해봐.")
+        detector.close()
         return
 
     print("[INFO] Camera opened.")

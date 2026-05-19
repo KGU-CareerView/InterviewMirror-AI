@@ -6,10 +6,10 @@ import grpc
 import numpy as np
 import onnxruntime as ort
 
-from generated import interview_pb2
-from generated import interview_pb2_grpc
 from app import config
 from app.labels import CLASS_NAMES
+from generated import interview_pb2
+from generated import interview_pb2_grpc
 
 try:
     from app.questions.gemini_question_client import GeminiQuestionClient
@@ -34,7 +34,9 @@ def get_model_path() -> str:
         if path.exists():
             return str(path)
 
-    raise FileNotFoundError(f"ONNX model not found. Checked: {[str(p) for p in candidates]}")
+    raise FileNotFoundError(
+        f"ONNX model not found. Checked: {[str(path) for path in candidates]}"
+    )
 
 
 MODEL_PATH = get_model_path()
@@ -103,7 +105,10 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             return interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
-                questions=[self._to_proto_question_item(item) for item in result.questions],
+                questions=[
+                    self._to_proto_question_item(item)
+                    for item in result.questions
+                ],
             )
 
         except Exception as exc:
@@ -171,7 +176,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             tooltip=item.tooltip,
             category=item.category,
             intent=item.intent,
-            answer_keywords=item.answer_keywords,
+            answer_keywords=list(item.answer_keywords),
         )
 
     def _analyze(self, request):
@@ -194,7 +199,10 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             )
 
         try:
-            input_tensor = self._features_to_tensor(request.features, request.tensor_shape)
+            input_tensor = self._features_to_tensor(
+                request.features,
+                request.tensor_shape,
+            )
         except ValueError as exc:
             return self._error_response(request, feedback=str(exc))
 
@@ -272,11 +280,6 @@ def serve():
     server.start()
 
     print("[gRPC Server] Interview AI gRPC server started on port 50051")
-    print("[gRPC Server] Server receives features only. No image bytes / MediaPipe / OpenCV processing here.")
-    print("[gRPC Server] AnalyzeFrame RPC is available.")
-    print("[gRPC Server] AnalyzeFrameStream RPC is available.")
-    print("[gRPC Server] GenerateInitialQuestions RPC is available.")
-    print("[gRPC Server] GenerateFollowUpQuestion RPC is available.")
 
     try:
         while True:

@@ -32,7 +32,7 @@ def main():
     stub = interview_pb2_grpc.InterviewAIServiceStub(channel)
 
     try:
-        health = stub.HealthCheck(interview_pb2.HealthRequest())
+        health = stub.HealthCheck(interview_pb2.HealthRequest(), timeout=3)
         print("[HEALTH]", health.status)
         print("[MODEL]", health.model_path)
         print("[QUESTION CLIENT]", health.question_client_status)
@@ -44,7 +44,7 @@ def main():
     request = make_dummy_request()
 
     try:
-        response = stub.AnalyzeFrame(request)
+        response = stub.AnalyzeFrame(request, timeout=5)
         print("[ANALYZE]")
         print("label:", response.label)
         print("confidence:", response.confidence)
