@@ -1,55 +1,85 @@
 import time
+from pathlib import Path
 
 import cv2
 import grpc
+import mediapipe as mp
 import numpy as np
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
 
+from app import config
 from generated import interview_pb2
 from generated import interview_pb2_grpc
 
 
 SERVER_ADDR = "127.0.0.1:50051"
-CAMERA_INDEX = 0
-INPUT_SIZE = 224
+CAMERA_INDEX = getattr(config, "CAMERA_INDEX", 0)
+INPUT_SIZE = getattr(config, "INPUT_SIZE", 224)
 
-# ImageNet normalize
-MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+BASE_DIR = Path(__file__).resolve().parent.parent
+FACE_DETECTOR_MODEL_PATH = Path(
+    getattr(config, "MEDIAPIPE_FACE_TASK_MODEL", BASE_DIR / "models" / "face_detector.task")
+)
+
+MEAN = np.array(getattr(config, "MEAN", [0.485, 0.456, 0.406]), dtype=np.float32)
+STD = np.array(getattr(config, "STD", [0.229, 0.224, 0.225]), dtype=np.float32)
 
 
-def detect_face_bbox(frame):
-    """
-    OpenCV Haar Cascade로 얼굴 bbox 찾기.
-    MediaPipe 없이도 로컬 테스트 가능하게 만든 버전.
-    return: (x1, y1, x2, y2) or None
-    """
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+def create_face_detector():
+    if not FACE_DETECTOR_MODEL_PATH.exists():
+        raise FileNotFoundError(f"MediaPipe face detector model not found: {FACE_DETECTOR_MODEL_PATH}")
 
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    detector = cv2.CascadeClassifier(cascade_path)
+    base_options = python.BaseOptions(model_asset_path=str(FACE_DETECTOR_MODEL_PATH))
 
-    faces = detector.detectMultiScale(
-        gray,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(80, 80),
+    options = vision.FaceDetectorOptions(
+        base_options=base_options,
+        running_mode=vision.RunningMode.IMAGE,
+        min_detection_confidence=getattr(config, "MIN_DETECTION_CONFIDENCE", 0.5),
     )
 
-    if len(faces) == 0:
+    return vision.FaceDetector.create_from_options(options)
+
+
+def detect_face_bbox_with_mediapipe(detector, frame_bgr):
+    """
+    MediaPipe FaceDetector로 얼굴 bbox 검출.
+    return: (x1, y1, x2, y2) or None
+    """
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+
+    detection_result = detector.detect(mp_image)
+
+    if not detection_result.detections:
         return None
 
-    # 가장 큰 얼굴 선택
-    x, y, w, h = max(faces, key=lambda box: box[2] * box[3])
+    frame_h, frame_w = frame_bgr.shape[:2]
 
-    # margin 추가
-    margin = 0.25
+    # 가장 큰 얼굴 선택
+    best_detection = max(
+        detection_result.detections,
+        key=lambda d: d.bounding_box.width * d.bounding_box.height,
+    )
+
+    bbox = best_detection.bounding_box
+
+    x = int(bbox.origin_x)
+    y = int(bbox.origin_y)
+    w = int(bbox.width)
+    h = int(bbox.height)
+
+    margin = getattr(config, "BBOX_MARGIN", 0.25)
     mx = int(w * margin)
     my = int(h * margin)
 
     x1 = max(0, x - mx)
     y1 = max(0, y - my)
-    x2 = min(frame.shape[1], x + w + mx)
-    y2 = min(frame.shape[0], y + h + my)
+    x2 = min(frame_w, x + w + mx)
+    y2 = min(frame_h, y + h + my)
+
+    if x2 <= x1 or y2 <= y1:
+        return None
 
     return x1, y1, x2, y2
 
@@ -85,9 +115,19 @@ def make_request(frame, bbox, session_id="local-camera-session", user_id="local-
     x1, y1, x2, y2 = bbox
     face = frame[y1:y2, x1:x2]
 
+    if face.size == 0:
+        return interview_pb2.FeatureRequest(
+            session_id=session_id,
+            user_id=user_id,
+            tensor_shape=[1, 3, INPUT_SIZE, INPUT_SIZE],
+            features=[],
+            timestamp=int(time.time() * 1000),
+            face_detected=False,
+            bbox=interview_pb2.BoundingBox(x1=0, y1=0, x2=0, y2=0),
+        )
+
     tensor = preprocess_face(face)
 
-    # 입력이 진짜 바뀌는지 확인용
     print(
         "[INPUT]",
         "mean:", round(float(tensor.mean()), 4),
@@ -113,6 +153,11 @@ def make_request(frame, bbox, session_id="local-camera-session", user_id="local-
 
 
 def main():
+    print("[INFO] Using MediaPipe FaceDetector")
+    print("[INFO] Face detector model:", FACE_DETECTOR_MODEL_PATH)
+
+    detector = create_face_detector()
+
     channel = grpc.insecure_channel(SERVER_ADDR)
     stub = interview_pb2_grpc.InterviewAIServiceStub(channel)
 
@@ -130,13 +175,13 @@ def main():
 
     if not cap.isOpened():
         print(f"[ERROR] Cannot open camera index {CAMERA_INDEX}")
-        print("Mac 설정 > 개인정보 보호 및 보안 > 카메라 권한 확인해봐.")
+        print("Mac 설정 > 개인정보 보호 및 보안 > 카메라에서 터미널/VSCode 권한 확인해봐.")
         return
 
     print("[INFO] Camera opened.")
     print("[INFO] Press q to quit.")
 
-    last_sent_time = 0
+    last_sent_time = 0.0
     send_interval = 0.8
 
     current_text = "waiting..."
@@ -149,11 +194,13 @@ def main():
                 print("[WARN] Failed to read frame.")
                 break
 
-            bbox = detect_face_bbox(frame)
+            bbox = detect_face_bbox_with_mediapipe(detector, frame)
 
             if bbox is not None:
                 x1, y1, x2, y2 = bbox
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            else:
+                current_text = "no face"
 
             now = time.time()
 
@@ -182,10 +229,10 @@ def main():
 
             cv2.putText(
                 frame,
-                "Press q to quit",
+                "MediaPipe FaceDetector / Press q to quit",
                 (20, 80),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
+                0.7,
                 (0, 255, 0),
                 2,
             )
@@ -198,7 +245,9 @@ def main():
     finally:
         cap.release()
         cv2.destroyAllWindows()
+        detector.close()
         print("[INFO] Camera released.")
+        print("[INFO] MediaPipe detector closed.")
 
 
 if __name__ == "__main__":
