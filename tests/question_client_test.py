@@ -1,7 +1,7 @@
 import grpc
 
-import interview_pb2
-import interview_pb2_grpc
+from generated import interview_pb2
+from generated import interview_pb2_grpc
 
 
 def test_initial_questions(stub):

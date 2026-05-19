@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from google import genai
 from pydantic import ValidationError
 
-from questions.schemas import (
+from app.questions.schemas import (
     FollowUpQuestionGenerateResult,
     QuestionGenerateResult,
 )

@@ -4,10 +4,10 @@ import cv2
 import grpc
 import numpy as np
 
-import config
-import interview_pb2
-import interview_pb2_grpc
-from face_cropper import FaceCropper
+from app import config
+from generated import interview_pb2
+from generated import interview_pb2_grpc
+from app.face_cropper import FaceCropper
 
 
 INPUT_SIZE = getattr(config, "INPUT_SIZE", 224)

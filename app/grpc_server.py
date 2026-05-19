@@ -4,8 +4,8 @@ import cv2
 import grpc
 import numpy as np
 
-import interview_pb2
-import interview_pb2_grpc
+from generated import interview_pb2
+from generated import interview_pb2_grpc
 
 
 INPUT_SIZE = 224
