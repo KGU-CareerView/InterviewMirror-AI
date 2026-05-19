@@ -1,9 +1,10 @@
-grpcio
-grpcio-tools
+grpcio==1.62.3
+grpcio-tools==1.62.3
+protobuf==4.25.3
 numpy
 onnxruntime
 opencv-python-headless
-mediapipe>=0.10.13
-google-genai
+mediapipe
 python-dotenv
-pydantic>=2.0.0
+google-genai
+pydantic
