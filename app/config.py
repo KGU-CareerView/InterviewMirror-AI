@@ -1,5 +1,9 @@
-MODEL_PATH = "interview_model_v3.onnx"
-MEDIAPIPE_FACE_TASK_MODEL = "face_detector.task"
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+MODEL_PATH = BASE_DIR / "models" / "interview_model_v3.onnx"
+MEDIAPIPE_FACE_TASK_MODEL = BASE_DIR / "models" / "face_detector.task"
 
 CAMERA_INDEX = 0
 FRAME_WIDTH = 1280
@@ -17,5 +21,4 @@ USE_BACKEND = False
 BACKEND_RESULT_URL = "http://127.0.0.1:8000/result"
 
 SEND_EVERY_N_FRAMES = 10
-
 DISPLAY_CONFIDENCE_THRESHOLD = 0.0
