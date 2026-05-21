@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 from concurrent import futures
 from pathlib import Path
 
@@ -64,6 +65,85 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             print(f"[WARN] Gemini question client disabled: {exc}")
             return None
 
+    def _log_request_header(self, rpc_name: str):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print("\n" + "=" * 80)
+        print(f"[REQUEST] {rpc_name} | {now}")
+        print("=" * 80)
+
+    def _log_feature_request(self, rpc_name: str, request):
+        self._log_request_header(rpc_name)
+
+        bbox = request.bbox
+
+        print(f"session_id    : {request.session_id}")
+        print(f"user_id       : {request.user_id}")
+        print(f"timestamp     : {request.timestamp}")
+        print(f"face_detected : {request.face_detected}")
+        print(
+            "bbox          : "
+            f"x1={bbox.x1}, y1={bbox.y1}, x2={bbox.x2}, y2={bbox.y2}"
+        )
+        print(f"tensor_shape  : {list(request.tensor_shape)}")
+        print(f"features_len  : {len(request.features)}")
+
+        if request.features:
+            arr = np.array(request.features, dtype=np.float32)
+            sample = arr[:10].tolist()
+
+            print(f"features_sample_first_10 : {sample}")
+            print(
+                "features_stats           : "
+                f"mean={float(arr.mean()):.6f}, "
+                f"std={float(arr.std()):.6f}, "
+                f"min={float(arr.min()):.6f}, "
+                f"max={float(arr.max()):.6f}"
+            )
+        else:
+            print("features_sample_first_10 : []")
+            print("features_stats           : empty")
+
+        print("=" * 80 + "\n")
+
+    def _log_initial_question_request(self, rpc_name: str, request):
+        self._log_request_header(rpc_name)
+
+        print(f"session_id        : {request.session_id}")
+        print(f"user_id           : {request.user_id}")
+        print(f"category          : {request.category}")
+        print(f"interview_type    : {request.interview_type}")
+        print(f"difficulty        : {request.difficulty}")
+        print(f"question_count    : {request.question_count}")
+        print(f"time_per_question : {request.time_per_question}")
+        print(f"language          : {request.language}")
+        print(f"resume_text_len   : {len(request.resume_text)}")
+        print(f"resume_text_preview: {request.resume_text[:300]}")
+        print("=" * 80 + "\n")
+
+    def _log_follow_up_question_request(self, rpc_name: str, request):
+        self._log_request_header(rpc_name)
+
+        print(f"session_id          : {request.session_id}")
+        print(f"user_id             : {request.user_id}")
+        print(f"category            : {request.category}")
+        print(f"interview_type      : {request.interview_type}")
+        print(f"difficulty          : {request.difficulty}")
+        print(f"language            : {request.language}")
+        print(f"previous_question   : {request.previous_question[:300]}")
+        print(f"answer_len          : {len(request.answer)}")
+        print(f"answer_preview      : {request.answer[:300]}")
+        print(f"resume_text_len     : {len(request.resume_text)}")
+        print(f"history_count       : {len(request.history)}")
+
+        for turn in request.history:
+            print(
+                f"history[{turn.index}] "
+                f"question={turn.question[:120]} | "
+                f"answer={turn.answer[:120]}"
+            )
+
+        print("=" * 80 + "\n")
+
     def HealthCheck(self, request, context):
         question_client_status = "enabled" if self.question_client is not None else "disabled"
 
@@ -74,13 +154,17 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         )
 
     def AnalyzeFrame(self, request, context):
+        self._log_feature_request("AnalyzeFrame", request)
         return self._analyze(request)
 
     def AnalyzeFrameStream(self, request_iterator, context):
         for request in request_iterator:
+            self._log_feature_request("AnalyzeFrameStream", request)
             yield self._analyze(request)
 
     def GenerateInitialQuestions(self, request, context):
+        self._log_initial_question_request("GenerateInitialQuestions", request)
+
         if self.question_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
             context.set_details("Question generation is disabled. Set GEMINI_API_KEY in .env.")
@@ -123,6 +207,8 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             )
 
     def GenerateFollowUpQuestion(self, request, context):
+        self._log_follow_up_question_request("GenerateFollowUpQuestion", request)
+
         if self.question_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
             context.set_details("Question generation is disabled. Set GEMINI_API_KEY in .env.")
