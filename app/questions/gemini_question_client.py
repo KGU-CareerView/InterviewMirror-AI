@@ -20,11 +20,7 @@ class FollowUpQuestionGenerateResult:
 
 
 class GeminiQuestionClient:
-    def __init__(
-        self,
-        api_key: str | None = None,
-        model: str | None = None,
-    ) -> None:
+    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
@@ -127,9 +123,7 @@ class GeminiQuestionClient:
         response = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-            ),
+            config=types.GenerateContentConfig(response_mime_type="application/json"),
         )
 
         response_text = response.text.strip()
@@ -179,35 +173,27 @@ class GeminiQuestionClient:
 
         return (
             "You are an interview question generation module for an AI mock interview service.\n"
-            "Generate interview questions based on the given input data.\n\n"
-            "The output language code is provided in the input JSON.\n"
-            "If the language code is ko-KR, write the question text in Korean.\n\n"
-            "Return ONLY valid JSON using this exact structure:\n"
+            "Generate interview questions based on the input JSON.\n"
+            "If language is ko-KR, write question, tooltip, category, intent, and keywords in Korean.\n"
+            "Return JSON only.\n"
+            "The JSON structure must be:\n"
             "{\n"
             '  "questions": [\n'
             "    {\n"
             '      "index": 1,\n'
             '      "question": "interview question",\n'
-            '      "tooltip": "short practical answering tip",\n'
+            '      "tooltip": "short answering tip",\n'
             '      "category": "question category",\n'
-            '      "intent": "what this question evaluates",\n'
+            '      "intent": "evaluation intent",\n'
             '      "answer_keywords": ["keyword1", "keyword2", "keyword3"]\n'
             "    }\n"
             "  ]\n"
-            "}\n\n"
+            "}\n"
             "Rules:\n"
             "1. Generate realistic interview questions.\n"
-            "2. Generate exactly question_count questions unless it is a follow-up request.\n"
-            "3. If follow_up_context exists, generate one follow-up question based on the previous question and user answer.\n"
-            "4. If resume_text exists, personalize the questions using it.\n"
-            "5. Avoid duplicate questions.\n"
-            "6. tooltip must be short and practical.\n"
-            "7. category should be one of: personality, job, technical, project, experience, follow-up, general.\n"
-            "8. intent must explain what the interviewer wants to evaluate.\n"
-            "9. answer_keywords must include 3 to 6 useful points.\n"
-            "10. Do not include markdown.\n"
-            "11. Do not include code fences.\n"
-            "12. Return JSON only.\n\n"
+            "2. If follow_up_context exists, generate one follow-up question.\n"
+            "3. Do not include markdown.\n"
+            "4. Do not include code fences.\n"
             "Input JSON:\n"
             f"{safe_payload}"
         )

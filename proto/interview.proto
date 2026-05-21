@@ -1,4 +1,3 @@
-// InterviewMirror AI gRPC protocol definitions.
 syntax = "proto3";
 
 package interview;
@@ -14,6 +13,7 @@ service InterviewAIService {
 
   rpc GenerateSubtitles (SubtitleRequest) returns (SubtitleResponse);
   rpc AnalyzeVoiceTone (VoiceToneAnalysisRequest) returns (VoiceToneAnalysisResponse);
+
   rpc GenerateFinalReport (FinalReportRequest) returns (FinalReportResponse);
 }
 
@@ -53,6 +53,7 @@ message HealthResponse {
   string question_client_status = 3;
   string subtitle_client_status = 4;
   string voice_tone_analyzer_status = 5;
+  string report_client_status = 6;
 }
 
 message InitialQuestionGenerateRequest {
@@ -158,7 +159,6 @@ message VoiceToneAnalysisResponse {
   double overall_stability_score = 12;
   string feedback = 13;
 }
-
 
 message ScoreSample {
   int64 timestamp = 1;
