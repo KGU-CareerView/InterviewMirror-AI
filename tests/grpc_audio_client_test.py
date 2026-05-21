@@ -1,4 +1,3 @@
-# gRPC audio test client for subtitles and voice tone analysis.
 import argparse
 from pathlib import Path
 
@@ -6,6 +5,9 @@ import grpc
 
 from generated import interview_pb2
 from generated import interview_pb2_grpc
+
+
+SERVER_ADDRESS = "127.0.0.1:50051"
 
 
 def guess_mime_type(audio_path: Path) -> str:
@@ -29,10 +31,94 @@ def guess_mime_type(audio_path: Path) -> str:
     return "audio/wav"
 
 
+def print_health(stub):
+    health = stub.HealthCheck(interview_pb2.HealthRequest(), timeout=5)
+
+    print("[HEALTH]", health.status)
+    print("[MODEL]", health.model_path)
+    print("[QUESTION CLIENT]", health.question_client_status)
+    print("[SUBTITLE CLIENT]", health.subtitle_client_status)
+    print("[VOICE TONE ANALYZER]", health.voice_tone_analyzer_status)
+
+
+def test_subtitle(stub, audio_bytes, audio_mime_type, args):
+    request = interview_pb2.SubtitleRequest(
+        session_id=args.session_id,
+        user_id=args.user_id,
+        audio=audio_bytes,
+        audio_mime_type=audio_mime_type,
+        language_hint=args.language,
+    )
+
+    print("\n[INFO] Testing GenerateSubtitles...")
+
+    try:
+        response = stub.GenerateSubtitles(request, timeout=90)
+
+        print("\n[SUBTITLE]")
+        print("session_id:", response.session_id)
+        print("user_id:", response.user_id)
+        print("language:", response.language)
+        print("summary:", response.summary)
+        print("segments:", len(response.segments))
+
+        for segment in response.segments:
+            print(
+                f"- #{segment.index} "
+                f"{segment.start_ms}ms ~ {segment.end_ms}ms: "
+                f"{segment.text}"
+            )
+
+        print("\n[SRT]")
+        print(response.srt)
+
+    except grpc.RpcError as exc:
+        print("\n[SUBTITLE ERROR]")
+        print(exc.code(), exc.details())
+
+
+def test_voice_tone(stub, audio_bytes, audio_mime_type, args):
+    request = interview_pb2.VoiceToneAnalysisRequest(
+        session_id=args.session_id,
+        user_id=args.user_id,
+        audio=audio_bytes,
+        audio_mime_type=audio_mime_type,
+        language_hint=args.language,
+    )
+
+    print("\n[INFO] Testing AnalyzeVoiceTone...")
+
+    try:
+        response = stub.AnalyzeVoiceTone(request, timeout=30)
+
+        print("\n[VOICE TONE]")
+        print("session_id:", response.session_id)
+        print("user_id:", response.user_id)
+
+        print("pitch_mean:", response.pitch_mean)
+        print("pitch_std:", response.pitch_std)
+        print("pitch_stability:", response.pitch_stability)
+
+        print("energy_mean:", response.energy_mean)
+        print("energy_std:", response.energy_std)
+        print("energy_stability:", response.energy_stability)
+
+        print("pause_ratio:", response.pause_ratio)
+        print("speech_duration_sec:", response.speech_duration_sec)
+        print("total_duration_sec:", response.total_duration_sec)
+
+        print("overall_stability_score:", response.overall_stability_score)
+        print("feedback:", response.feedback)
+
+    except grpc.RpcError as exc:
+        print("\n[VOICE TONE ERROR]")
+        print(exc.code(), exc.details())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--audio", required=True, help="Path to audio file")
-    parser.add_argument("--server", default="127.0.0.1:50051")
+    parser.add_argument("--server", default=SERVER_ADDRESS)
     parser.add_argument("--session-id", default="audio-test-session")
     parser.add_argument("--user-id", default="audio-test-user")
     parser.add_argument("--language", default="ko-KR")
@@ -50,63 +136,21 @@ def main():
     channel = grpc.insecure_channel(args.server)
     stub = interview_pb2_grpc.InterviewAIServiceStub(channel)
 
-    health = stub.HealthCheck(interview_pb2.HealthRequest(), timeout=5)
+    print_health(stub)
 
-    print("[HEALTH]", health.status)
-    print("[MODEL]", health.model_path)
-    print("[QUESTION CLIENT]", health.question_client_status)
-    print("[SUBTITLE CLIENT]", health.subtitle_client_status)
-    print("[VOICE TONE ANALYZER]", health.voice_tone_analyzer_status)
-
-    subtitle_request = interview_pb2.SubtitleRequest(
-        session_id=args.session_id,
-        user_id=args.user_id,
-        audio=audio_bytes,
+    test_subtitle(
+        stub=stub,
+        audio_bytes=audio_bytes,
         audio_mime_type=audio_mime_type,
-        language_hint=args.language,
+        args=args,
     )
 
-    try:
-        subtitle_response = stub.GenerateSubtitles(subtitle_request, timeout=60)
-
-        print("\n[SUBTITLE]")
-        print("language:", subtitle_response.language)
-        print("summary:", subtitle_response.summary)
-        print("segments:", len(subtitle_response.segments))
-        print("srt:")
-        print(subtitle_response.srt)
-
-    except grpc.RpcError as exc:
-        print("\n[SUBTITLE ERROR]")
-        print(exc.code(), exc.details())
-
-    tone_request = interview_pb2.VoiceToneAnalysisRequest(
-        session_id=args.session_id,
-        user_id=args.user_id,
-        audio=audio_bytes,
+    test_voice_tone(
+        stub=stub,
+        audio_bytes=audio_bytes,
         audio_mime_type=audio_mime_type,
-        language_hint=args.language,
+        args=args,
     )
-
-    try:
-        tone_response = stub.AnalyzeVoiceTone(tone_request, timeout=30)
-
-        print("\n[VOICE TONE]")
-        print("pitch_mean:", tone_response.pitch_mean)
-        print("pitch_std:", tone_response.pitch_std)
-        print("pitch_stability:", tone_response.pitch_stability)
-        print("energy_mean:", tone_response.energy_mean)
-        print("energy_std:", tone_response.energy_std)
-        print("energy_stability:", tone_response.energy_stability)
-        print("pause_ratio:", tone_response.pause_ratio)
-        print("speech_duration_sec:", tone_response.speech_duration_sec)
-        print("total_duration_sec:", tone_response.total_duration_sec)
-        print("overall_stability_score:", tone_response.overall_stability_score)
-        print("feedback:", tone_response.feedback)
-
-    except grpc.RpcError as exc:
-        print("\n[VOICE TONE ERROR]")
-        print(exc.code(), exc.details())
 
 
 if __name__ == "__main__":

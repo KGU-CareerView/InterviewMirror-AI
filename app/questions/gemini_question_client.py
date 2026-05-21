@@ -1,13 +1,15 @@
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 from pydantic import ValidationError
 
-from app.questions.schemas import QuestionGenerateResult, QuestionItemModel
-
+from app.questions.schemas import QuestionGenerateResult
+from app.questions.schemas import QuestionItemModel
 
 load_dotenv()
 
@@ -42,13 +44,15 @@ class GeminiQuestionClient:
         language: str,
     ) -> QuestionGenerateResult:
         return self.generate_questions_with_tooltips(
-            job_role=category or "지원 직무 미지정",
-            company_name="회사명 미지정",
+            job_role=category or "unspecified job role",
+            company_name="unspecified company",
             resume_text=resume_text or "",
-            interview_type=interview_type or "종합",
+            interview_type=interview_type or "general",
             question_count=question_count or 3,
             difficulty=difficulty or "normal",
             language=language or "ko-KR",
+            time_per_question=time_per_question or 60,
+            follow_up_context=None,
         )
 
     def generate_follow_up_question(
@@ -62,29 +66,35 @@ class GeminiQuestionClient:
         history: list[dict[str, Any]],
         language: str,
     ) -> FollowUpQuestionGenerateResult:
-        follow_up_context = f"""
-이전 질문:
-{previous_question}
-
-지원자 답변:
-{answer}
-
-이전 면접 기록:
-{history}
-
-이력서/자기소개서:
-{resume_text}
-""".strip()
+        follow_up_context = {
+            "previous_question": previous_question or "",
+            "user_answer": answer or "",
+            "history": history or [],
+            "resume_text": resume_text or "",
+        }
 
         result = self.generate_questions_with_tooltips(
-            job_role=category or "지원 직무 미지정",
-            company_name="회사명 미지정",
-            resume_text=follow_up_context,
-            interview_type=f"{interview_type or '종합'} 꼬리질문",
+            job_role=category or "unspecified job role",
+            company_name="unspecified company",
+            resume_text=resume_text or "",
+            interview_type=f"{interview_type or 'general'} follow-up",
             question_count=1,
             difficulty=difficulty or "normal",
             language=language or "ko-KR",
+            time_per_question=60,
+            follow_up_context=follow_up_context,
         )
+
+        if not result.questions:
+            fallback_question = QuestionItemModel(
+                index=1,
+                question="Could you explain your previous answer in more detail?",
+                tooltip="Add a concrete example and explain your role clearly.",
+                category="follow-up",
+                intent="Evaluate answer depth and consistency.",
+                answer_keywords=["example", "role", "result"],
+            )
+            return FollowUpQuestionGenerateResult(question=fallback_question)
 
         return FollowUpQuestionGenerateResult(question=result.questions[0])
 
@@ -97,6 +107,8 @@ class GeminiQuestionClient:
         question_count: int,
         difficulty: str,
         language: str,
+        time_per_question: int = 60,
+        follow_up_context: dict[str, Any] | None = None,
     ) -> QuestionGenerateResult:
         question_count = self._normalize_question_count(question_count)
 
@@ -108,24 +120,25 @@ class GeminiQuestionClient:
             question_count=question_count,
             difficulty=difficulty,
             language=language,
+            time_per_question=time_per_question,
+            follow_up_context=follow_up_context,
         )
 
         response = self.client.models.generate_content(
             model=self.model,
             contents=prompt,
-            config={
-                "response_mime_type": "application/json",
-                "response_schema": QuestionGenerateResult,
-            },
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
         )
 
-        parsed = getattr(response, "parsed", None)
-
-        if parsed is not None:
-            return parsed
+        response_text = response.text.strip()
 
         try:
-            return QuestionGenerateResult.model_validate_json(response.text)
+            data = json.loads(response_text)
+            return QuestionGenerateResult.model_validate(data)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Gemini question response is not valid JSON: {response_text}") from exc
         except ValidationError as exc:
             raise ValueError(f"Invalid Gemini question response: {exc}") from exc
 
@@ -147,43 +160,54 @@ class GeminiQuestionClient:
         question_count: int,
         difficulty: str,
         language: str,
+        time_per_question: int,
+        follow_up_context: dict[str, Any] | None,
     ) -> str:
-        job_role = job_role.strip() or "지원 직무 미지정"
-        company_name = company_name.strip() or "회사명 미지정"
-        resume_text = resume_text.strip() or "제공된 이력서/자기소개서 내용 없음"
-        interview_type = interview_type.strip() or "종합"
-        difficulty = difficulty.strip() or "normal"
-        language = language.strip() or "ko-KR"
+        payload = {
+            "job_role": job_role or "unspecified job role",
+            "company_name": company_name or "unspecified company",
+            "resume_text": resume_text or "",
+            "interview_type": interview_type or "general",
+            "question_count": question_count,
+            "difficulty": difficulty or "normal",
+            "language": language or "ko-KR",
+            "time_per_question": time_per_question,
+            "follow_up_context": follow_up_context,
+        }
 
-        return f"""
-너는 AI 모의면접 서비스의 면접 질문 생성기다.
+        safe_payload = json.dumps(payload, ensure_ascii=True, indent=2)
 
-사용자 정보:
-- 지원 직무: {job_role}
-- 회사명: {company_name}
-- 면접 유형: {interview_type}
-- 난이도: {difficulty}
-- 응답 언어: {language}
-
-이력서/자기소개서/포트폴리오 내용:
-{resume_text}
-
-생성해야 할 것:
-- 면접 질문 {question_count}개
-- 각 질문별 tooltip
-- 각 질문의 category
-- 각 질문의 intent
-- 답변에 포함하면 좋은 answer_keywords
-
-중요 규칙:
-1. 질문은 실제 면접에서 물어볼 법한 자연스러운 문장으로 작성한다.
-2. tooltip은 프론트에서 말풍선/도움말로 보여줄 문장이므로 짧고 실용적으로 작성한다.
-3. tooltip에는 답변 구조를 알려준다. 예: "상황-역할-행동-결과 순서로 답변하면 좋아요."
-4. resume_text가 있으면 그 내용에 기반한 개인화 질문을 우선 생성한다.
-5. resume_text가 부족하면 직무 기반 일반 질문을 생성한다.
-6. 같은 의미의 질문을 반복하지 않는다.
-7. category는 다음 중 하나에 가깝게 작성한다: 인성, 직무, 기술, 프로젝트, 경험, 꼬리질문, 종합.
-8. intent는 "이 질문을 통해 무엇을 확인하려는지"를 설명한다.
-9. answer_keywords는 3~6개 정도로 작성한다.
-10. 반드시 JSON schema에 맞는 데이터만 반환한다.
-""".strip()
+        return (
+            "You are an interview question generation module for an AI mock interview service.\n"
+            "Generate interview questions based on the given input data.\n\n"
+            "The output language code is provided in the input JSON.\n"
+            "If the language code is ko-KR, write the question text in Korean.\n\n"
+            "Return ONLY valid JSON using this exact structure:\n"
+            "{\n"
+            '  "questions": [\n'
+            "    {\n"
+            '      "index": 1,\n'
+            '      "question": "interview question",\n'
+            '      "tooltip": "short practical answering tip",\n'
+            '      "category": "question category",\n'
+            '      "intent": "what this question evaluates",\n'
+            '      "answer_keywords": ["keyword1", "keyword2", "keyword3"]\n'
+            "    }\n"
+            "  ]\n"
+            "}\n\n"
+            "Rules:\n"
+            "1. Generate realistic interview questions.\n"
+            "2. Generate exactly question_count questions unless it is a follow-up request.\n"
+            "3. If follow_up_context exists, generate one follow-up question based on the previous question and user answer.\n"
+            "4. If resume_text exists, personalize the questions using it.\n"
+            "5. Avoid duplicate questions.\n"
+            "6. tooltip must be short and practical.\n"
+            "7. category should be one of: personality, job, technical, project, experience, follow-up, general.\n"
+            "8. intent must explain what the interviewer wants to evaluate.\n"
+            "9. answer_keywords must include 3 to 6 useful points.\n"
+            "10. Do not include markdown.\n"
+            "11. Do not include code fences.\n"
+            "12. Return JSON only.\n\n"
+            "Input JSON:\n"
+            f"{safe_payload}"
+        )

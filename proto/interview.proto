@@ -14,6 +14,7 @@ service InterviewAIService {
 
   rpc GenerateSubtitles (SubtitleRequest) returns (SubtitleResponse);
   rpc AnalyzeVoiceTone (VoiceToneAnalysisRequest) returns (VoiceToneAnalysisResponse);
+  rpc GenerateFinalReport (FinalReportRequest) returns (FinalReportResponse);
 }
 
 message FeatureRequest {
@@ -156,4 +157,77 @@ message VoiceToneAnalysisResponse {
 
   double overall_stability_score = 12;
   string feedback = 13;
+}
+
+
+message ScoreSample {
+  int64 timestamp = 1;
+  double expression_score = 2;
+  double voice_score = 3;
+  double total_score = 4;
+  string expression_label = 5;
+  string note = 6;
+}
+
+message QuestionAnalysisResult {
+  int32 index = 1;
+  string question = 2;
+  string answer = 3;
+  string follow_up_question = 4;
+  string subtitle_summary = 5;
+
+  double voice_score = 6;
+  double expression_score = 7;
+  double total_score = 8;
+
+  string voice_feedback = 9;
+  string expression_feedback = 10;
+}
+
+message FinalReportRequest {
+  string session_id = 1;
+  string user_id = 2;
+  string category = 3;
+  string interview_type = 4;
+  string difficulty = 5;
+  string resume_text = 6;
+  string language = 7;
+
+  repeated QuestionAnalysisResult question_results = 8;
+  repeated ScoreSample timeline_scores = 9;
+}
+
+message ReportStrengthMessage {
+  string title = 1;
+  string detail = 2;
+}
+
+message ReportWeaknessMessage {
+  string title = 1;
+  string detail = 2;
+  string improvement = 3;
+}
+
+message ReportTimeInsightMessage {
+  string time_range = 1;
+  string observation = 2;
+  string suggestion = 3;
+}
+
+message FinalReportResponse {
+  string session_id = 1;
+  string user_id = 2;
+
+  string overall_summary = 3;
+  double overall_score = 4;
+
+  double content_score = 5;
+  double voice_score = 6;
+  double expression_score = 7;
+
+  repeated ReportStrengthMessage strengths = 8;
+  repeated ReportWeaknessMessage weaknesses = 9;
+  repeated ReportTimeInsightMessage time_based_insights = 10;
+
+  string final_advice = 11;
 }
