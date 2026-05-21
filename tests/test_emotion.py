@@ -1,10 +1,12 @@
+from pathlib import Path
 import cv2
 import numpy as np
 import onnxruntime as ort
 import time
 
 # 모델 경로 설정
-MODEL_PATH = 'interview_model_myface_v8.onnx'
+BASE_DIR = Path(__file__).resolve().parent.parent
+MODEL_PATH = BASE_DIR / "models" / "interview_model_v3.onnx"
 
 # 클래스 매핑
 CLASS_NAMES = {0: 'Stable', 1: 'Nervous', 2: 'Neutral'}
