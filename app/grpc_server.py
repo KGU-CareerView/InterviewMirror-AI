@@ -472,6 +472,19 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         logits = outputs[0]
         probs = self._softmax(logits[0])
 
+        nervous_prob = float(probs[0])
+        neutral_prob = float(probs[1])
+        confident_prob = float(probs[2])
+
+        expression_score = (
+            nervous_prob * 35.0
+            + neutral_prob * 72.0
+            + confident_prob * 95.0
+        )
+
+        print(f"probs:{probs}", flush=True)
+        print(f"expression_score:{expression_score:.2f}", flush=True)
+
         pred_idx = int(np.argmax(probs))
         confidence = float(probs[pred_idx])
 
