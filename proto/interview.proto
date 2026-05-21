@@ -1,3 +1,4 @@
+// InterviewMirror AI gRPC protocol definitions.
 syntax = "proto3";
 
 package interview;

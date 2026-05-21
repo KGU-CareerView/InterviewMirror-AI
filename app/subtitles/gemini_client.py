@@ -1,3 +1,4 @@
+# Gemini subtitle client for interview audio transcription.
 import json
 import os
 from pathlib import Path

@@ -1,3 +1,4 @@
+# gRPC audio test client for subtitles and voice tone analysis.
 import argparse
 from pathlib import Path
 

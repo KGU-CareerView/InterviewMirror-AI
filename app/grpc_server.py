@@ -1,3 +1,4 @@
+# gRPC server for model inference, LLM questions, subtitles, and voice tone analysis.
 import tempfile
 import time
 from concurrent import futures
