@@ -1,4 +1,3 @@
-# gRPC, ONNX, Gemini, and audio analysis dependencies
 grpcio==1.62.3
 grpcio-tools==1.62.3
 protobuf==4.25.3
@@ -11,3 +10,4 @@ google-genai
 pydantic
 librosa
 soundfile
+sounddevice

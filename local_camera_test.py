@@ -4,6 +4,7 @@ import cv2
 import grpc
 import numpy as np
 
+from app import config
 from generated import interview_pb2
 from generated import interview_pb2_grpc
 
@@ -12,8 +13,11 @@ SERVER_ADDRESS = "127.0.0.1:50051"
 SESSION_ID = "local-camera-session"
 USER_ID = "local-camera-user"
 
-INPUT_SIZE = 224
+INPUT_SIZE = getattr(config, "INPUT_SIZE", 224)
 SEND_INTERVAL_SEC = 0.5
+
+MEAN = np.array(getattr(config, "MEAN", [0.485, 0.456, 0.406]), dtype=np.float32)
+STD = np.array(getattr(config, "STD", [0.229, 0.224, 0.225]), dtype=np.float32)
 
 
 def preprocess_frame(frame):
@@ -21,10 +25,12 @@ def preprocess_frame(frame):
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
 
     arr = rgb.astype(np.float32) / 255.0
+    arr = (arr - MEAN) / STD
+
     arr = np.transpose(arr, (2, 0, 1))
     arr = np.expand_dims(arr, axis=0)
 
-    return arr
+    return arr.astype(np.float32)
 
 
 def detect_face(frame):
@@ -48,10 +54,40 @@ def detect_face(frame):
     return True, (x, y, x + w, y + h)
 
 
+def crop_face_with_margin(frame, bbox, margin_ratio=0.25):
+    x1, y1, x2, y2 = bbox
+
+    h, w = frame.shape[:2]
+    box_w = x2 - x1
+    box_h = y2 - y1
+
+    margin_x = int(box_w * margin_ratio)
+    margin_y = int(box_h * margin_ratio)
+
+    nx1 = max(0, x1 - margin_x)
+    ny1 = max(0, y1 - margin_y)
+    nx2 = min(w, x2 + margin_x)
+    ny2 = min(h, y2 + margin_y)
+
+    if nx2 <= nx1 or ny2 <= ny1:
+        return frame
+
+    return frame[ny1:ny2, nx1:nx2]
+
+
 def make_request(frame):
-    tensor = preprocess_frame(frame)
     face_detected, bbox = detect_face(frame)
 
+    if face_detected:
+        model_frame = crop_face_with_margin(
+            frame,
+            bbox,
+            margin_ratio=getattr(config, "BBOX_MARGIN", 0.25),
+        )
+    else:
+        model_frame = frame
+
+    tensor = preprocess_frame(model_frame)
     x1, y1, x2, y2 = bbox
 
     return interview_pb2.FeatureRequest(
@@ -115,6 +151,16 @@ def draw_result(frame, response):
         2,
     )
 
+    cv2.putText(
+        frame,
+        "Press q to quit",
+        (20, 150),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2,
+    )
+
     print("=" * 80)
     print("[MODEL RESULT]")
     print("label:", label)
@@ -144,7 +190,10 @@ def main():
         print("PYTHONPATH=. python -m app.grpc_server")
         return
 
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(getattr(config, "CAMERA_INDEX", 0))
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, getattr(config, "FRAME_WIDTH", 1280))
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, getattr(config, "FRAME_HEIGHT", 720))
 
     if not cap.isOpened():
         print("[ERROR] Cannot open camera.")

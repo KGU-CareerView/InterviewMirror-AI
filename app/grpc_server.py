@@ -549,6 +549,11 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
         label = CLASS_NAMES[pred_idx] if pred_idx < len(CLASS_NAMES) else str(pred_idx)
 
+        print("[MODEL DEBUG] logits:", logits[0].tolist())
+        print("[MODEL DEBUG] probs:", probs.tolist())
+        print("[MODEL DEBUG] pred_idx:", pred_idx)
+        print("[MODEL DEBUG] label:", label)
+
         return interview_pb2.AnalysisResponse(
             session_id=request.session_id,
             user_id=request.user_id,
