@@ -8,11 +8,11 @@ service InterviewAIService {
 
   rpc HealthCheck (HealthRequest) returns (HealthResponse);
 
-  rpc GenerateInitialQuestions (InitialQuestionGenerateRequest)
-      returns (InitialQuestionGenerateResponse);
+  rpc GenerateInitialQuestions (InitialQuestionGenerateRequest) returns (InitialQuestionGenerateResponse);
+  rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest) returns (FollowUpQuestionGenerateResponse);
 
-  rpc GenerateFollowUpQuestion (FollowUpQuestionGenerateRequest)
-      returns (FollowUpQuestionGenerateResponse);
+  rpc GenerateSubtitles (SubtitleRequest) returns (SubtitleResponse);
+  rpc AnalyzeVoiceTone (VoiceToneAnalysisRequest) returns (VoiceToneAnalysisResponse);
 }
 
 message FeatureRequest {
@@ -49,12 +49,13 @@ message HealthResponse {
   string status = 1;
   string model_path = 2;
   string question_client_status = 3;
+  string subtitle_client_status = 4;
+  string voice_tone_analyzer_status = 5;
 }
 
 message InitialQuestionGenerateRequest {
   string session_id = 1;
   string user_id = 2;
-
   string category = 3;
   string interview_type = 4;
   string difficulty = 5;
@@ -73,7 +74,6 @@ message InitialQuestionGenerateResponse {
 message FollowUpQuestionGenerateRequest {
   string session_id = 1;
   string user_id = 2;
-
   string previous_question = 3;
   string answer = 4;
   string category = 5;
@@ -103,4 +103,56 @@ message InterviewTurn {
   int32 index = 1;
   string question = 2;
   string answer = 3;
+}
+
+message SubtitleRequest {
+  string session_id = 1;
+  string user_id = 2;
+  bytes audio = 3;
+  string audio_mime_type = 4;
+  string language_hint = 5;
+}
+
+message SubtitleSegmentMessage {
+  int32 index = 1;
+  int64 start_ms = 2;
+  int64 end_ms = 3;
+  string text = 4;
+}
+
+message SubtitleResponse {
+  string session_id = 1;
+  string user_id = 2;
+  string language = 3;
+  string summary = 4;
+  repeated SubtitleSegmentMessage segments = 5;
+  string srt = 6;
+}
+
+message VoiceToneAnalysisRequest {
+  string session_id = 1;
+  string user_id = 2;
+  bytes audio = 3;
+  string audio_mime_type = 4;
+  string language_hint = 5;
+}
+
+message VoiceToneAnalysisResponse {
+  string session_id = 1;
+  string user_id = 2;
+
+  double pitch_mean = 3;
+  double pitch_std = 4;
+  double pitch_stability = 5;
+
+  double energy_mean = 6;
+  double energy_std = 7;
+  double energy_stability = 8;
+
+  double pause_ratio = 9;
+  double speech_duration_sec = 10;
+  double total_duration_sec = 11;
+
+  double overall_stability_score = 12;
+  string feedback = 13;
 }

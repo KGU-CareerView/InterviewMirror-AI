@@ -8,3 +8,5 @@ mediapipe
 python-dotenv
 google-genai
 pydantic
+librosa
+soundfile

@@ -8,6 +8,8 @@ ENV PYTHONPATH=/app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
+    ffmpeg \
+    libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements_grpc.txt .
@@ -16,7 +18,8 @@ RUN pip install --no-cache-dir -r requirements_grpc.txt
 
 COPY . .
 
-RUN python -m grpc_tools.protoc \
+RUN mkdir -p generated \
+    && python -m grpc_tools.protoc \
     -I proto \
     --python_out=generated \
     --grpc_python_out=generated \

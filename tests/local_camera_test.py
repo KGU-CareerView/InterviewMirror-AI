@@ -186,7 +186,7 @@ def main():
     print("[INFO] Press q to quit.")
 
     last_sent_time = 0.0
-    send_interval = 0.8
+    send_interval = 0.3
 
     current_text = "waiting..."
 

@@ -9,17 +9,19 @@ class SubtitleSegment(BaseModel):
 
     @field_validator("text")
     @classmethod
-    
     def validate_text(cls, value: str) -> str:
         value = value.strip()
+
         if not value:
             raise ValueError("Subtitle text must not be empty.")
+
         return value
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "SubtitleSegment":
         if self.end_ms <= self.start_ms:
             raise ValueError("end_ms must be greater than start_ms.")
+
         return self
 
 
