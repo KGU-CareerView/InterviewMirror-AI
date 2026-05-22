@@ -1,3 +1,4 @@
+# Local camera inference test client
 import time
 
 import cv2
