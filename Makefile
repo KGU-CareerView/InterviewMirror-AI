@@ -2,7 +2,7 @@ PYTHON   := venv/bin/python
 PROTO    := proto/interview.proto
 GEN_DIR  := generated
 
-.PHONY: help proto install run dev clean
+.PHONY: help proto install run dev clean docker
 
 help:
 	@echo "Usage: make <target>"
@@ -11,6 +11,7 @@ help:
 	@echo "  install  Install dependencies into venv"
 	@echo "  run      Generate proto stubs then start the gRPC server"
 	@echo "  dev      Same as run, with hot-reload via watchfiles"
+	@echo "  docker   Build and run the application in a Docker container"
 	@echo "  clean    Remove generated stubs and __pycache__"
 
 proto:
@@ -41,6 +42,12 @@ run: proto
 dev: proto
 	@echo "[dev] Starting gRPC server with auto-reload..."
 	$(PYTHON) -m watchfiles "python -m app.grpc_server" app proto
+
+docker:
+	@echo "[docker] Building Docker image..."
+	docker build -t interview-ai .
+	@echo "[docker] Running Docker container..."
+	docker run --env-file .env -p 50051:50051 --name interview-ai interview-ai
 
 clean:
 	@echo "[clean] Removing generated files..."
