@@ -9,7 +9,7 @@ InterviewMirror AI gRPC server.
 - Docker
 - gRPC 포트: `50051`
 - ONNX 모델 파일: `models/interview_model_v3.onnx`
-- 선택 환경 변수: `GEMINI_API_KEY`, `GEMINI_MODEL`
+- 선택 환경 변수: `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_REPORT_MODEL`
 
 ## Docker 실행
 
@@ -63,9 +63,11 @@ pip install --no-cache-dir --no-deps --no-build-isolation -e .
 ```env
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_MODEL=gemini-2.0-flash
+GEMINI_REPORT_MODEL=gemini-3.1-pro-preview
 ```
 
-`GEMINI_MODEL`은 생략하면 기본값으로 `gemini-2.0-flash`를 사용합니다.
+`GEMINI_MODEL`은 질문 생성에 사용합니다. `GEMINI_REPORT_MODEL`은 최종 리포트 생성에 사용하며,
+생략하면 기본값으로 `gemini-3.1-pro-preview`를 사용합니다.
 
 ## 로컬 실행
 

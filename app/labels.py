@@ -1,5 +1,5 @@
 CLASS_NAMES = [
-    "nervous_anxious",
+    "stable_confident",
     "neutral",
-    "stable_confident"
+    "nervous_anxious"
 ]

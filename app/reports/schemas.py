@@ -18,6 +18,18 @@ class ReportTimeInsight(BaseModel):
     suggestion: str = Field(description="Suggestion for this time range.")
 
 
+class QuestionFeedback(BaseModel):
+    index: int = Field(description="Question index from the request.")
+    total_score: float = Field(description="Question-level final score from 0 to 100.")
+    content_score: float = Field(description="Question-level content score from 0 to 100.")
+    voice_score: float = Field(description="Question-level voice score from 0 to 100.")
+    expression_score: float = Field(description="Question-level expression score from 0 to 100.")
+    overall_feedback: str = Field(description="Question-level overall feedback.")
+    content_feedback: str = Field(description="Question-level content feedback.")
+    voice_feedback: str = Field(description="Question-level voice feedback.")
+    expression_feedback: str = Field(description="Question-level expression feedback.")
+
+
 class FinalInterviewReport(BaseModel):
     overall_summary: str = Field(description="Overall interview summary.")
     overall_score: float = Field(description="Final score from 0 to 100.")
@@ -31,3 +43,4 @@ class FinalInterviewReport(BaseModel):
     time_based_insights: list[ReportTimeInsight] = Field(description="Time-based feedback.")
 
     final_advice: str = Field(description="Final interview improvement advice.")
+    question_feedbacks: list[QuestionFeedback] = Field(description="Question-level feedback.")

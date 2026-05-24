@@ -19,7 +19,7 @@ class GeminiReportClient:
         model: str | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+        self.model = model or os.getenv("GEMINI_REPORT_MODEL", "gemini-3.1-pro-preview")
 
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
@@ -36,6 +36,7 @@ class GeminiReportClient:
         resume_text: str,
         question_results: list[dict[str, Any]],
         timeline_scores: list[dict[str, Any]],
+        emotion_graph_json: str = "",
         language: str = "ko-KR",
     ) -> FinalInterviewReport:
         prompt = self._build_prompt(
@@ -47,6 +48,7 @@ class GeminiReportClient:
             resume_text=resume_text,
             question_results=question_results,
             timeline_scores=timeline_scores,
+            emotion_graph_json=emotion_graph_json,
             language=language,
         )
 
@@ -55,6 +57,7 @@ class GeminiReportClient:
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema=FinalInterviewReport,
             ),
         )
 
@@ -78,6 +81,7 @@ class GeminiReportClient:
         resume_text: str,
         question_results: list[dict[str, Any]],
         timeline_scores: list[dict[str, Any]],
+        emotion_graph_json: str,
         language: str,
     ) -> str:
         payload = {
@@ -89,21 +93,30 @@ class GeminiReportClient:
             "resume_text": resume_text,
             "question_results": question_results,
             "timeline_scores": timeline_scores,
+            "emotion_graph_json": emotion_graph_json,
             "language": language,
         }
 
         return f"""
-You are an AI interview coach.
+You are a senior AI interview diagnostician for a mock interview product.
 
-Generate a final interview report based on:
-1. Interview questions
-2. User answers transcribed from speech
-3. Follow-up questions
-4. Voice tone stability scores
-5. Facial expression scores
-6. Time-based behavior score timeline
+Generate a detailed and professional final interview report from the input data.
+The report must diagnose the candidate across four axes:
+1. Facial emotion and expression analysis:
+   - Use emotion_graph_json for the full-session expression trend.
+   - Use each question_results[].emotion_result_json for question-level signals.
+2. Answer content and accuracy:
+   - Use question, answer, category, interview_type, difficulty, and resume_text.
+   - Evaluate relevance, specificity, logical structure, job fit, technical accuracy, and consistency.
+3. Answer length and response time:
+   - Use answer_length and response_time_seconds.
+   - Diagnose whether the answer was too short, verbose, delayed, rushed, or well-paced.
+4. Voice analysis:
+   - Use voice_score as the precomputed reference score.
+   - Use audio_summary, zcr_samples, pitch_stability, energy_stability, pause_ratio, and voice_feedback
+     to explain speech stability, volume consistency, pauses, speed, filler tendency, and delivery confidence.
 
-The output language must follow this language code: {language}
+The output language must follow this language code: {language}.
 
 Return ONLY valid JSON with this exact structure:
 
@@ -133,14 +146,34 @@ Return ONLY valid JSON with this exact structure:
       "suggestion": "suggestion"
     }}
   ],
-  "final_advice": "final advice"
+  "final_advice": "final advice",
+  "question_feedbacks": [
+    {{
+      "index": 1,
+      "total_score": 0,
+      "content_score": 0,
+      "voice_score": 0,
+      "expression_score": 0,
+      "overall_feedback": "question-level overall feedback",
+      "content_feedback": "answer content feedback",
+      "voice_feedback": "voice feedback",
+      "expression_feedback": "expression feedback"
+    }}
+  ]
 }}
 
 Scoring rules:
 - overall_score must be 0 to 100.
+- overall_score must synthesize content_score, voice_score, expression_score, and timing/length quality.
 - content_score must reflect answer completeness, relevance, specificity, and consistency.
 - voice_score must reflect pitch stability, energy stability, pause ratio, and speech flow.
 - expression_score must reflect facial expression stability, confidence, and nervousness signals.
+- Each question_feedbacks item must match one input question_results[].index.
+- Question total_score must synthesize content, voice, expression, answer length, and response time.
+- Do not invent facts that are not supported by the transcript, resume, or analysis metrics.
+- If a transcript is short or missing, lower content confidence and explain the limitation.
+- Keep feedback concrete: mention observable evidence such as answer length, response time,
+  speech_ratio, wpm, pause_count, filler_word_count, ttr, emotion labels, or score changes when available.
 - time_based_insights must mention specific time ranges when scores changed noticeably.
 - Do not include markdown.
 - Do not include code fences.

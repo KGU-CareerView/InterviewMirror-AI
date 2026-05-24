@@ -1,6 +1,5 @@
 # InterviewMirror AI gRPC server
 import os
-import tempfile
 import time
 from concurrent import futures
 from datetime import datetime
@@ -24,16 +23,6 @@ else:
     QUESTION_CLIENT_IMPORT_ERROR = None
 
 try:
-    from app.subtitles.gemini_client import GeminiSubtitleClient
-    from app.subtitles.subtitle_formatter import subtitle_result_to_srt
-except Exception as exc:
-    GeminiSubtitleClient = None
-    subtitle_result_to_srt = None
-    SUBTITLE_CLIENT_IMPORT_ERROR = exc
-else:
-    SUBTITLE_CLIENT_IMPORT_ERROR = None
-
-try:
     from app.voice.voice_tone_analyzer import VoiceToneAnalyzer
 except Exception as exc:
     VoiceToneAnalyzer = None
@@ -41,8 +30,54 @@ except Exception as exc:
 else:
     VOICE_TONE_ANALYZER_IMPORT_ERROR = None
 
+try:
+    from app.reports.gemini_report_client import GeminiReportClient
+except Exception as exc:
+    GeminiReportClient = None
+    REPORT_CLIENT_IMPORT_ERROR = exc
+else:
+    REPORT_CLIENT_IMPORT_ERROR = None
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _audio_summary_to_dict(audio_summary) -> dict:
+    return {
+        "speech_ratio": audio_summary.speech_ratio,
+        "avg_rms": audio_summary.avg_rms,
+        "rms_cov": audio_summary.rms_cov,
+        "wpm": audio_summary.wpm,
+        "pause_count": audio_summary.pause_count,
+        "avg_pause_duration_ms": audio_summary.avg_pause_duration_ms,
+        "max_pause_duration_ms": audio_summary.max_pause_duration_ms,
+        "response_latency_ms": audio_summary.response_latency_ms,
+        "end_fade_out": audio_summary.end_fade_out,
+        "estimated_filler_count": audio_summary.estimated_filler_count,
+        "filler_word_count": audio_summary.filler_word_count,
+        "word_count": audio_summary.word_count,
+        "ttr": audio_summary.ttr,
+    }
+
+
+def _zcr_stats(zcr_samples: list[float]) -> dict:
+    if not zcr_samples:
+        return {
+            "count": 0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+        }
+
+    zcr_array = np.array(zcr_samples, dtype=np.float32)
+    return {
+        "count": len(zcr_samples),
+        "mean": round(float(np.mean(zcr_array)), 5),
+        "std": round(float(np.std(zcr_array)), 5),
+        "min": round(float(np.min(zcr_array)), 5),
+        "max": round(float(np.max(zcr_array)), 5),
+    }
 
 
 def get_model_path() -> str:
@@ -83,8 +118,8 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         self.input_name = self.session.get_inputs()[0].name
 
         self.question_client = self._init_question_client()
-        self.subtitle_client = self._init_subtitle_client()
         self.voice_tone_analyzer = self._init_voice_tone_analyzer()
+        self.report_client = self._init_report_client()
 
     def _init_question_client(self):
         if GeminiQuestionClient is None:
@@ -99,19 +134,6 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             print(f"[WARN] Gemini question client disabled: {exc}")
             return None
 
-    def _init_subtitle_client(self):
-        if GeminiSubtitleClient is None:
-            print(f"[WARN] Subtitle client import failed: {SUBTITLE_CLIENT_IMPORT_ERROR}")
-            return None
-
-        try:
-            client = GeminiSubtitleClient()
-            print("[INFO] Gemini subtitle client enabled")
-            return client
-        except Exception as exc:
-            print(f"[WARN] Gemini subtitle client disabled: {exc}")
-            return None
-
     def _init_voice_tone_analyzer(self):
         if VoiceToneAnalyzer is None:
             print(f"[WARN] Voice tone analyzer import failed: {VOICE_TONE_ANALYZER_IMPORT_ERROR}")
@@ -123,6 +145,19 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             return analyzer
         except Exception as exc:
             print(f"[WARN] Voice tone analyzer disabled: {exc}")
+            return None
+
+    def _init_report_client(self):
+        if GeminiReportClient is None:
+            print(f"[WARN] Report client import failed: {REPORT_CLIENT_IMPORT_ERROR}")
+            return None
+
+        try:
+            client = GeminiReportClient()
+            print("[INFO] Gemini report client enabled")
+            return client
+        except Exception as exc:
+            print(f"[WARN] Gemini report client disabled: {exc}")
             return None
 
     def _log_request_header(self, rpc_name: str):
@@ -143,38 +178,13 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         print(f"tensor_shape : {list(request.tensor_shape)}")
         print(f"features_len : {len(request.features)}")
 
-    def _log_audio_request(self, rpc_name: str, request):
-        self._log_request_header(rpc_name)
-        print(f"session_id : {request.session_id}")
-        print(f"user_id : {request.user_id}")
-        print(f"audio_mime_type : {request.audio_mime_type}")
-        print(f"language_hint : {request.language_hint}")
-        print(f"audio_size_bytes : {len(request.audio)}")
-
-    def _get_audio_suffix(self, audio_mime_type: str) -> str:
-        mime = (audio_mime_type or "").lower()
-
-        if "wav" in mime:
-            return ".wav"
-        if "mpeg" in mime or "mp3" in mime:
-            return ".mp3"
-        if "webm" in mime:
-            return ".webm"
-        if "ogg" in mime:
-            return ".ogg"
-        if "m4a" in mime or "mp4" in mime:
-            return ".m4a"
-
-        return ".wav"
-
     def HealthCheck(self, request, context):
         return interview_pb2.HealthResponse(
             status="ok",
             model_path=MODEL_PATH,
             question_client_status="enabled" if self.question_client else "disabled",
-            subtitle_client_status="enabled" if self.subtitle_client else "disabled",
             voice_tone_analyzer_status="enabled" if self.voice_tone_analyzer else "disabled",
-            report_client_status="disabled",
+            report_client_status="enabled" if self.report_client else "disabled",
         )
 
     def AnalyzeFrame(self, request, context):
@@ -277,118 +287,35 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 user_id=request.user_id,
             )
 
-    def GenerateSubtitles(self, request, context):
-        self._log_audio_request("GenerateSubtitles", request)
-
-        if self.subtitle_client is None:
-            context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-            context.set_details("Subtitle generation is disabled. Set GEMINI_API_KEY in .env.")
-            return interview_pb2.SubtitleResponse(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                language=request.language_hint or "ko-KR",
-                summary="",
-                segments=[],
-                srt="",
-            )
-
-        if not request.audio:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("Audio data is empty.")
-            return interview_pb2.SubtitleResponse(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                language=request.language_hint or "ko-KR",
-                summary="",
-                segments=[],
-                srt="",
-            )
-
-        suffix = self._get_audio_suffix(request.audio_mime_type)
-        temp_audio_path = None
-
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
-                temp_audio.write(request.audio)
-                temp_audio_path = Path(temp_audio.name)
-
-            result = self.subtitle_client.generate_subtitles(
-                audio_path=temp_audio_path,
-                language_hint=request.language_hint or "ko-KR",
-            )
-
-            srt = subtitle_result_to_srt(result)
-
-            return interview_pb2.SubtitleResponse(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                language=result.language,
-                summary=result.summary,
-                segments=[
-                    interview_pb2.SubtitleSegmentMessage(
-                        index=segment.index,
-                        start_ms=segment.start_ms,
-                        end_ms=segment.end_ms,
-                        text=segment.text,
-                    )
-                    for segment in result.segments
-                ],
-                srt=srt,
-            )
-
-        except Exception as exc:
-            print(f"[ERROR] Subtitle generation failed: {exc}")
-            context.set_code(grpc.StatusCode.INTERNAL)
-            context.set_details(f"Subtitle generation failed: {exc}")
-
-            return interview_pb2.SubtitleResponse(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                language=request.language_hint or "ko-KR",
-                summary="",
-                segments=[],
-                srt="",
-            )
-
-        finally:
-            if temp_audio_path is not None:
-                try:
-                    temp_audio_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
     def AnalyzeVoiceTone(self, request, context):
-        self._log_audio_request("AnalyzeVoiceTone", request)
+        self._log_request_header("AnalyzeVoiceTone")
+        print(f"session_id : {request.session_id}")
+        print(f"user_id : {request.user_id}")
+        print(f"question_index : {request.question_index}")
+        print(f"response_time_seconds : {request.response_time_seconds}")
+        print(f"zcr_samples_count : {len(request.zcr_samples)}")
 
         if self.voice_tone_analyzer is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
             context.set_details("Voice tone analyzer is disabled.")
-
             return interview_pb2.VoiceToneAnalysisResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 feedback="Voice tone analyzer is disabled.",
             )
 
-        if not request.audio:
-            context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
-            context.set_details("Audio data is empty.")
-
-            return interview_pb2.VoiceToneAnalysisResponse(
-                session_id=request.session_id,
-                user_id=request.user_id,
-                feedback="Audio data is empty.",
+        try:
+            result = self.voice_tone_analyzer.analyze_from_features(
+                audio_summary=request.audio_summary,
+                zcr_samples=list(request.zcr_samples),
+                response_time_seconds=request.response_time_seconds,
             )
 
-        suffix = self._get_audio_suffix(request.audio_mime_type)
-        temp_audio_path = None
-
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
-                temp_audio.write(request.audio)
-                temp_audio_path = Path(temp_audio.name)
-
-            result = self.voice_tone_analyzer.analyze(temp_audio_path)
+            print(f"[VOICE] pitch_stability    : {result.pitch_stability:.2f}")
+            print(f"[VOICE] energy_stability   : {result.energy_stability:.2f}")
+            print(f"[VOICE] pause_ratio        : {result.pause_ratio:.3f}")
+            print(f"[VOICE] overall_score      : {result.overall_stability_score:.2f}")
+            print(f"[VOICE] feedback           : {result.feedback}")
 
             return interview_pb2.VoiceToneAnalysisResponse(
                 session_id=request.session_id,
@@ -410,36 +337,178 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             print(f"[ERROR] Voice tone analysis failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Voice tone analysis failed: {exc}")
-
             return interview_pb2.VoiceToneAnalysisResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 feedback="Voice tone analysis failed.",
             )
 
-        finally:
-            if temp_audio_path is not None:
-                try:
-                    temp_audio_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-
     def GenerateFinalReport(self, request, context):
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details("GenerateFinalReport is temporarily disabled in stable recovery build.")
-        return interview_pb2.FinalReportResponse(
-            session_id=request.session_id,
-            user_id=request.user_id,
-            overall_summary="Final report generation is temporarily disabled.",
-            overall_score=0.0,
-            content_score=0.0,
-            voice_score=0.0,
-            expression_score=0.0,
-            strengths=[],
-            weaknesses=[],
-            time_based_insights=[],
-            final_advice="Restore stable server first, then enable final report generation.",
-        )
+        self._log_request_header("GenerateFinalReport")
+        print(f"session_id : {request.session_id}")
+        print(f"user_id : {request.user_id}")
+        print(f"question_results_count : {len(request.question_results)}")
+
+        if self.report_client is None:
+            context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
+            context.set_details("Report generation is disabled. Set GEMINI_API_KEY in .env.")
+            return interview_pb2.FinalReportResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                overall_summary="Report generation is disabled.",
+                overall_score=0.0,
+                content_score=0.0,
+                voice_score=0.0,
+                expression_score=0.0,
+                strengths=[],
+                weaknesses=[],
+                time_based_insights=[],
+                final_advice="Set GEMINI_API_KEY in .env to enable report generation.",
+                question_feedbacks=[],
+            )
+
+        try:
+            question_results = []
+            voice_scores = []
+
+            for qa in request.question_results:
+                voice_result = None
+                response_time_seconds = getattr(qa, "response_time_seconds", 60) or 60
+                has_audio_summary = (
+                    qa.HasField("audio_summary") if hasattr(qa, "HasField") else True
+                )
+                has_voice_features = has_audio_summary or len(qa.zcr_samples) > 0
+
+                if self.voice_tone_analyzer is not None and has_voice_features:
+                    voice_result = self.voice_tone_analyzer.analyze_from_features(
+                        audio_summary=qa.audio_summary,
+                        zcr_samples=list(qa.zcr_samples),
+                        response_time_seconds=response_time_seconds,
+                    )
+                    print(
+                        f"[VOICE] Q{qa.index}"
+                        f"  pitch={voice_result.pitch_stability:.2f}"
+                        f"  energy={voice_result.energy_stability:.2f}"
+                        f"  pause={voice_result.pause_ratio:.3f}"
+                        f"  score={voice_result.overall_stability_score:.2f}"
+                    )
+
+                voice_stability_score = (
+                    voice_result.overall_stability_score if voice_result else qa.voice_score
+                )
+                voice_feedback = voice_result.feedback if voice_result else qa.voice_feedback
+                voice_scores.append(voice_stability_score)
+                zcr_samples = [round(float(sample), 5) for sample in qa.zcr_samples]
+                answer_length = getattr(qa, "answer_length", 0) or len(qa.answer)
+
+                question_results.append({
+                    "index": qa.index,
+                    "question": qa.question,
+                    "answer": qa.answer,
+                    "follow_up_question": qa.follow_up_question,
+                    "subtitle_summary": qa.subtitle_summary,
+                    "answer_length": answer_length,
+                    "response_time_seconds": response_time_seconds,
+                    "voice_score": voice_stability_score,
+                    "expression_score": qa.expression_score,
+                    "total_score": qa.total_score,
+                    "voice_feedback": voice_feedback,
+                    "expression_feedback": qa.expression_feedback,
+                    "emotion_result_json": getattr(qa, "emotion_result_json", ""),
+                    "audio_summary": _audio_summary_to_dict(qa.audio_summary),
+                    "zcr_samples": zcr_samples,
+                    "zcr_stats": _zcr_stats(zcr_samples),
+                    "pitch_stability": voice_result.pitch_stability if voice_result else None,
+                    "energy_stability": voice_result.energy_stability if voice_result else None,
+                    "pause_ratio": voice_result.pause_ratio if voice_result else None,
+                })
+
+            timeline_scores = [
+                {
+                    "timestamp": s.timestamp,
+                    "expression_score": s.expression_score,
+                    "voice_score": s.voice_score,
+                    "total_score": s.total_score,
+                    "expression_label": s.expression_label,
+                    "note": s.note,
+                }
+                for s in request.timeline_scores
+            ]
+
+            report = self.report_client.generate_final_report(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                category=request.category,
+                interview_type=request.interview_type,
+                difficulty=request.difficulty,
+                resume_text=request.resume_text,
+                question_results=question_results,
+                timeline_scores=timeline_scores,
+                emotion_graph_json=getattr(request, "emotion_graph_json", ""),
+                language=request.language or "ko-KR",
+            )
+
+            return interview_pb2.FinalReportResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                overall_summary=report.overall_summary,
+                overall_score=report.overall_score,
+                content_score=report.content_score,
+                voice_score=report.voice_score,
+                expression_score=report.expression_score,
+                strengths=[
+                    interview_pb2.ReportStrengthMessage(title=s.title, detail=s.detail)
+                    for s in report.strengths
+                ],
+                weaknesses=[
+                    interview_pb2.ReportWeaknessMessage(
+                        title=w.title, detail=w.detail, improvement=w.improvement
+                    )
+                    for w in report.weaknesses
+                ],
+                time_based_insights=[
+                    interview_pb2.ReportTimeInsightMessage(
+                        time_range=t.time_range,
+                        observation=t.observation,
+                        suggestion=t.suggestion,
+                    )
+                    for t in report.time_based_insights
+                ],
+                final_advice=report.final_advice,
+                question_feedbacks=[
+                    interview_pb2.QuestionFeedback(
+                        index=q.index,
+                        total_score=q.total_score,
+                        content_score=q.content_score,
+                        voice_score=q.voice_score,
+                        expression_score=q.expression_score,
+                        overall_feedback=q.overall_feedback,
+                        content_feedback=q.content_feedback,
+                        voice_feedback=q.voice_feedback,
+                        expression_feedback=q.expression_feedback,
+                    )
+                    for q in report.question_feedbacks
+                ],
+            )
+
+        except Exception as exc:
+            print(f"[ERROR] Final report generation failed: {exc}")
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(f"Final report generation failed: {exc}")
+            return interview_pb2.FinalReportResponse(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                overall_summary="Report generation failed.",
+                overall_score=0.0,
+                content_score=0.0,
+                voice_score=0.0,
+                expression_score=0.0,
+                strengths=[],
+                weaknesses=[],
+                time_based_insights=[],
+                final_advice="",
+                question_feedbacks=[],
+            )
 
     def _to_proto_question_item(self, item):
         return interview_pb2.QuestionItem(

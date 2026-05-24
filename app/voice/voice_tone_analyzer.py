@@ -1,8 +1,5 @@
-# Voice tone stability analyzer for interview audio.
 from dataclasses import dataclass
-from pathlib import Path
 
-import librosa
 import numpy as np
 
 
@@ -25,125 +22,79 @@ class VoiceToneResult:
 
 
 class VoiceToneAnalyzer:
-    def __init__(self, sample_rate: int = 16000) -> None:
-        self.sample_rate = sample_rate
 
-    def analyze(self, audio_path: Path) -> VoiceToneResult:
-        audio_path = Path(audio_path)
+    def analyze_from_features(
+        self,
+        audio_summary,
+        zcr_samples: list[float],
+        response_time_seconds: int,
+    ) -> VoiceToneResult:
+        response_time_sec = float(response_time_seconds) if response_time_seconds > 0 else 1.0
 
-        if not audio_path.exists():
-            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        avg_rms = audio_summary.avg_rms or 0.0
+        rms_cov = audio_summary.rms_cov or 0.0
+        energy_mean = avg_rms
+        energy_std = avg_rms * rms_cov
+        energy_stability = max(0.0, 100.0 * (1.0 - rms_cov / 0.5))
 
-        y, sr = librosa.load(str(audio_path), sr=self.sample_rate, mono=True)
+        speech_ratio = audio_summary.speech_ratio or 0.0
+        pause_ratio = max(0.0, 1.0 - speech_ratio)
+        speech_duration_sec = speech_ratio * response_time_sec
+        total_duration_sec = response_time_sec
 
-        if y.size == 0:
-            return self._empty_result("음성 데이터가 비어 있습니다.")
-
-        total_duration = float(librosa.get_duration(y=y, sr=sr))
-
-        pitch_mean, pitch_std, pitch_stability = self._analyze_pitch(y, sr)
-        energy_mean, energy_std, energy_stability = self._analyze_energy(y)
-        pause_ratio, speech_duration = self._analyze_pause(y, sr, total_duration)
+        zcr_provided = len(zcr_samples) > 0
+        if zcr_provided:
+            pitch_mean, pitch_std, pitch_stability = self._analyze_pitch_from_zcr(zcr_samples)
+        else:
+            pitch_mean, pitch_std, pitch_stability = 0.0, 0.0, 50.0
 
         pause_score = max(0.0, 100.0 - pause_ratio * 100.0)
-
-        overall_score = (
-            pitch_stability * 0.4
-            + energy_stability * 0.35
-            + pause_score * 0.25
-        )
+        if zcr_provided:
+            overall_score = (
+                pitch_stability * 0.4
+                + energy_stability * 0.35
+                + pause_score * 0.25
+            )
+        else:
+            overall_score = energy_stability * 0.6 + pause_score * 0.4
 
         feedback = self._make_feedback(
             overall_score=overall_score,
             pitch_stability=pitch_stability,
             energy_stability=energy_stability,
             pause_ratio=pause_ratio,
+            zcr_provided=zcr_provided,
         )
 
         return VoiceToneResult(
-            pitch_mean=round(pitch_mean, 2),
-            pitch_std=round(pitch_std, 2),
+            pitch_mean=round(pitch_mean, 4),
+            pitch_std=round(pitch_std, 4),
             pitch_stability=round(pitch_stability, 2),
-
             energy_mean=round(energy_mean, 5),
             energy_std=round(energy_std, 5),
             energy_stability=round(energy_stability, 2),
-
             pause_ratio=round(pause_ratio, 3),
-            speech_duration_sec=round(speech_duration, 2),
-            total_duration_sec=round(total_duration, 2),
-
+            speech_duration_sec=round(speech_duration_sec, 2),
+            total_duration_sec=round(total_duration_sec, 2),
             overall_stability_score=round(overall_score, 2),
             feedback=feedback,
         )
 
-    def _analyze_pitch(self, y: np.ndarray, sr: int) -> tuple[float, float, float]:
-        pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    def _analyze_pitch_from_zcr(
+        self, zcr_samples: list[float]
+    ) -> tuple[float, float, float]:
+        zcr_array = np.array(zcr_samples, dtype=np.float32)
+        zcr_mean = float(np.mean(zcr_array))
+        zcr_std = float(np.std(zcr_array))
 
-        pitch_values: list[float] = []
-
-        for frame_idx in range(pitches.shape[1]):
-            max_idx = int(np.argmax(magnitudes[:, frame_idx]))
-            pitch = float(pitches[max_idx, frame_idx])
-
-            if 50.0 <= pitch <= 500.0:
-                pitch_values.append(pitch)
-
-        if not pitch_values:
-            return 0.0, 0.0, 50.0
-
-        pitch_array = np.array(pitch_values, dtype=np.float32)
-        pitch_mean = float(np.mean(pitch_array))
-        pitch_std = float(np.std(pitch_array))
-
-        pitch_stability = self._score_inverse_variation(
-            value_std=pitch_std,
-            reference=120.0,
-        )
-
-        return pitch_mean, pitch_std, pitch_stability
-
-    def _analyze_energy(self, y: np.ndarray) -> tuple[float, float, float]:
-        rms = librosa.feature.rms(y=y)[0]
-
-        energy_mean = float(np.mean(rms))
-        energy_std = float(np.std(rms))
-
-        energy_stability = self._score_inverse_variation(
-            value_std=energy_std,
-            reference=0.05,
-        )
-
-        return energy_mean, energy_std, energy_stability
-
-    def _analyze_pause(
-        self,
-        y: np.ndarray,
-        sr: int,
-        total_duration: float,
-    ) -> tuple[float, float]:
-        intervals = librosa.effects.split(y, top_db=30)
-
-        speech_samples = 0
-
-        for start, end in intervals:
-            speech_samples += int(end - start)
-
-        speech_duration = speech_samples / sr
-
-        if total_duration <= 0:
-            return 1.0, 0.0
-
-        pause_ratio = max(0.0, 1.0 - speech_duration / total_duration)
-
-        return pause_ratio, speech_duration
+        # ZCR std reference=0.05: std >= 0.05 → 불안정 판정
+        pitch_stability = self._score_inverse_variation(value_std=zcr_std, reference=0.05)
+        return zcr_mean, zcr_std, pitch_stability
 
     def _score_inverse_variation(self, value_std: float, reference: float) -> float:
         if reference <= 0:
             return 0.0
-
         score = 100.0 - min(value_std / reference, 1.0) * 100.0
-
         return max(0.0, min(100.0, score))
 
     def _make_feedback(
@@ -152,6 +103,7 @@ class VoiceToneAnalyzer:
         pitch_stability: float,
         energy_stability: float,
         pause_ratio: float,
+        zcr_provided: bool,
     ) -> str:
         feedbacks: list[str] = []
 
@@ -162,7 +114,7 @@ class VoiceToneAnalyzer:
         else:
             feedbacks.append("목소리 톤의 흔들림이 비교적 크게 나타났습니다.")
 
-        if pitch_stability < 60:
+        if zcr_provided and pitch_stability < 60:
             feedbacks.append("목소리 높낮이 변화가 커서 긴장감이 드러날 수 있습니다.")
 
         if energy_stability < 60:
@@ -172,21 +124,3 @@ class VoiceToneAnalyzer:
             feedbacks.append("침묵 구간이 많아 답변 흐름이 끊겨 보일 수 있습니다.")
 
         return " ".join(feedbacks)
-
-    def _empty_result(self, message: str) -> VoiceToneResult:
-        return VoiceToneResult(
-            pitch_mean=0.0,
-            pitch_std=0.0,
-            pitch_stability=0.0,
-
-            energy_mean=0.0,
-            energy_std=0.0,
-            energy_stability=0.0,
-
-            pause_ratio=1.0,
-            speech_duration_sec=0.0,
-            total_duration_sec=0.0,
-
-            overall_stability_score=0.0,
-            feedback=message,
-        )
