@@ -41,6 +41,11 @@ else:
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+DEFAULT_ANSWER_PLACEHOLDERS = {
+    "사용자가 답변을 완료했습니다",
+    "사용자가 답변을 완료했습니다.",
+}
+
 
 def _audio_summary_to_dict(audio_summary) -> dict:
     return {
@@ -58,6 +63,10 @@ def _audio_summary_to_dict(audio_summary) -> dict:
         "word_count": audio_summary.word_count,
         "ttr": audio_summary.ttr,
     }
+
+
+def _is_default_answer_placeholder(answer: str) -> bool:
+    return answer.strip() in DEFAULT_ANSWER_PLACEHOLDERS
 
 
 def _zcr_stats(zcr_samples: list[float]) -> dict:
@@ -374,6 +383,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             for qa in request.question_results:
                 voice_result = None
                 response_time_seconds = getattr(qa, "response_time_seconds", 60) or 60
+                answer_is_placeholder = _is_default_answer_placeholder(qa.answer)
                 has_audio_summary = (
                     qa.HasField("audio_summary") if hasattr(qa, "HasField") else True
                 )
@@ -384,6 +394,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                         audio_summary=qa.audio_summary,
                         zcr_samples=list(qa.zcr_samples),
                         response_time_seconds=response_time_seconds,
+                        transcript_is_placeholder=answer_is_placeholder,
                     )
                     print(
                         f"[VOICE] Q{qa.index}"
@@ -399,12 +410,24 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 voice_feedback = voice_result.feedback if voice_result else qa.voice_feedback
                 voice_scores.append(voice_stability_score)
                 zcr_samples = [round(float(sample), 5) for sample in qa.zcr_samples]
-                answer_length = getattr(qa, "answer_length", 0) or len(qa.answer)
+                effective_answer = "" if answer_is_placeholder else qa.answer
+                answer_length = (
+                    0
+                    if answer_is_placeholder
+                    else getattr(qa, "answer_length", 0) or len(qa.answer)
+                )
 
                 question_results.append({
                     "index": qa.index,
                     "question": qa.question,
-                    "answer": qa.answer,
+                    "answer": effective_answer,
+                    "raw_answer": qa.answer,
+                    "answer_is_placeholder": answer_is_placeholder,
+                    "transcript_status": (
+                        "placeholder_no_transcript"
+                        if answer_is_placeholder
+                        else "transcribed"
+                    ),
                     "follow_up_question": qa.follow_up_question,
                     "subtitle_summary": qa.subtitle_summary,
                     "answer_length": answer_length,

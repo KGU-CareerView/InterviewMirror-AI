@@ -4,12 +4,16 @@ from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import errors
 from google.genai import types
 from pydantic import ValidationError
 
 from app.reports.schemas import FinalInterviewReport
 
 load_dotenv()
+
+DEFAULT_REPORT_MODEL = "gemini-3.5-flash"
+DEFAULT_REPORT_FALLBACK_MODEL = "gemini-2.5-flash"
 
 
 class GeminiReportClient:
@@ -19,7 +23,11 @@ class GeminiReportClient:
         model: str | None = None,
     ) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
-        self.model = model or os.getenv("GEMINI_REPORT_MODEL", "gemini-3.1-pro-preview")
+        self.model = model or os.getenv("GEMINI_REPORT_MODEL", DEFAULT_REPORT_MODEL)
+        self.fallback_model = os.getenv(
+            "GEMINI_REPORT_FALLBACK_MODEL",
+            DEFAULT_REPORT_FALLBACK_MODEL,
+        )
 
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
@@ -52,14 +60,7 @@ class GeminiReportClient:
             language=language,
         )
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=FinalInterviewReport,
-            ),
-        )
+        response = self._generate_content_with_fallback(prompt)
 
         response_text = response.text.strip()
 
@@ -70,6 +71,35 @@ class GeminiReportClient:
             raise ValueError(f"Gemini report response is not valid JSON: {response_text}") from exc
         except ValidationError as exc:
             raise ValueError(f"Invalid Gemini report response: {exc}") from exc
+
+    def _generate_content_with_fallback(self, prompt: str):
+        config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=FinalInterviewReport,
+        )
+
+        try:
+            return self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=config,
+            )
+        except errors.APIError as exc:
+            if not self._is_resource_exhausted(exc) or self.model == self.fallback_model:
+                raise
+
+            print(
+                "[WARN] Gemini report model quota exhausted; "
+                f"retrying with fallback model: {self.fallback_model}"
+            )
+            return self.client.models.generate_content(
+                model=self.fallback_model,
+                contents=prompt,
+                config=config,
+            )
+
+    def _is_resource_exhausted(self, exc: errors.APIError) -> bool:
+        return exc.code == 429 or exc.status == "RESOURCE_EXHAUSTED"
 
     def _build_prompt(
         self,
@@ -108,6 +138,8 @@ The report must diagnose the candidate across four axes:
 2. Answer content and accuracy:
    - Use question, answer, category, interview_type, difficulty, and resume_text.
    - Evaluate relevance, specificity, logical structure, job fit, technical accuracy, and consistency.
+   - If transcript_status is "placeholder_no_transcript" or answer_is_placeholder is true,
+     treat the answer as missing. Do not evaluate raw_answer as user content.
 3. Answer length and response time:
    - Use answer_length and response_time_seconds.
    - Diagnose whether the answer was too short, verbose, delayed, rushed, or well-paced.
