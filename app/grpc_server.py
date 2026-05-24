@@ -1,4 +1,5 @@
 # InterviewMirror AI gRPC server
+import os
 import tempfile
 import time
 from concurrent import futures
@@ -45,11 +46,19 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def get_model_path() -> str:
-    candidates = [
+    candidates = []
+
+    for path in [
         Path(config.MODEL_PATH),
         BASE_DIR / "models" / "interview_model_v3.onnx",
         BASE_DIR / "models" / "emotion_model.onnx",
-    ]
+    ]:
+        if path not in candidates:
+            candidates.append(path)
+
+    for path in sorted((BASE_DIR / "models").glob("*.onnx")):
+        if path not in candidates:
+            candidates.append(path)
 
     for path in candidates:
         if path.exists():
@@ -560,10 +569,17 @@ def serve():
         server,
     )
 
-    server.add_insecure_port("[::]:50051")
+    host = os.getenv("GRPC_HOST", "0.0.0.0")
+    port = int(os.getenv("GRPC_PORT", "50051"))
+    address = f"{host}:{port}"
+
+    bound_port = server.add_insecure_port(address)
+    if bound_port == 0:
+        raise RuntimeError(f"Failed to bind gRPC server to {address}")
+
     server.start()
 
-    print("[gRPC Server] Interview AI gRPC server started on port 50051")
+    print(f"[gRPC Server] Interview AI gRPC server started on {address}")
 
     try:
         while True:

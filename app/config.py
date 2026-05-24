@@ -1,8 +1,9 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-MODEL_PATH = BASE_DIR / "models" / "interview_model_v3.onnx"
+MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "models" / "interview_model_v3.onnx"))
 MEDIAPIPE_FACE_TASK_MODEL = BASE_DIR / "models" / "face_detector.task"
 
 CAMERA_INDEX = 0

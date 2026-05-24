@@ -26,6 +26,8 @@ RUN mkdir -p generated \
     proto/interview.proto \
     && python -c "from pathlib import Path; p=Path('generated/interview_pb2_grpc.py'); s=p.read_text(); s=s.replace('import interview_pb2 as interview__pb2', 'from generated import interview_pb2 as interview__pb2'); p.write_text(s); Path('generated/__init__.py').touch()"
 
+RUN pip install --no-cache-dir --no-deps --no-build-isolation -e .
+
 EXPOSE 50051
 
 CMD ["python", "-m", "app.grpc_server"]
