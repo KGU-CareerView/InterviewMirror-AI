@@ -24,11 +24,15 @@ class GeminiQuestionClient:
     def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = model or os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+        self.timeout_ms = int(os.getenv("GEMINI_TIMEOUT_MS", "30000"))
 
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=self.timeout_ms),
+        )
 
     def generate_initial_questions(
         self,

@@ -1,6 +1,8 @@
 # InterviewMirror AI gRPC server
 import os
 import time
+import threading
+import json
 from concurrent import futures
 from datetime import datetime
 from pathlib import Path
@@ -8,6 +10,7 @@ from pathlib import Path
 import grpc
 import numpy as np
 import onnxruntime as ort
+from google.protobuf.json_format import MessageToJson
 
 from app import config
 from app.labels import CLASS_NAMES
@@ -109,8 +112,7 @@ def get_model_path() -> str:
             return str(path)
 
     raise FileNotFoundError(
-        "ONNX model not found. "
-        f"Checked: {[str(path) for path in candidates]}"
+        f"ONNX model not found. Checked: {[str(path) for path in candidates]}"
     )
 
 
@@ -121,6 +123,7 @@ DEFAULT_TENSOR_SHAPE = [1, 3, DEFAULT_INPUT_SIZE, DEFAULT_INPUT_SIZE]
 
 class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
     def __init__(self):
+        self._log_lock = threading.Lock()
         print(f"[INFO] Loading ONNX model: {MODEL_PATH}")
 
         self.session = ort.InferenceSession(str(MODEL_PATH))
@@ -132,7 +135,9 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
     def _init_question_client(self):
         if GeminiQuestionClient is None:
-            print(f"[WARN] Question client import failed: {QUESTION_CLIENT_IMPORT_ERROR}")
+            print(
+                f"[WARN] Question client import failed: {QUESTION_CLIENT_IMPORT_ERROR}"
+            )
             return None
 
         try:
@@ -145,7 +150,9 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
     def _init_voice_tone_analyzer(self):
         if VoiceToneAnalyzer is None:
-            print(f"[WARN] Voice tone analyzer import failed: {VOICE_TONE_ANALYZER_IMPORT_ERROR}")
+            print(
+                f"[WARN] Voice tone analyzer import failed: {VOICE_TONE_ANALYZER_IMPORT_ERROR}"
+            )
             return None
 
         try:
@@ -169,48 +176,104 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             print(f"[WARN] Gemini report client disabled: {exc}")
             return None
 
+    def _synchronized_print(self, *lines):
+        """Print multiple lines atomically to prevent interleaving in multithreaded environment."""
+        with self._log_lock:
+            for line in lines:
+                print(line)
+
     def _log_request_header(self, rpc_name: str):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print("\n" + "=" * 80)
-        print(f"[REQUEST] {rpc_name} | {now}")
-        print("=" * 80)
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[REQUEST] {rpc_name} | {now}",
+            "=" * 80,
+        )
 
     def _log_feature_request(self, rpc_name: str, request):
-        self._log_request_header(rpc_name)
         bbox = request.bbox
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[REQUEST] {rpc_name} | {now}",
+            "=" * 80,
+            f"session_id : {request.session_id}",
+            f"user_id : {request.user_id}",
+            f"timestamp : {request.timestamp}",
+            f"face_detected : {request.face_detected}",
+            f"bbox : x1={bbox.x1}, y1={bbox.y1}, x2={bbox.x2}, y2={bbox.y2}",
+            f"tensor_shape : {list(request.tensor_shape)}",
+            f"features_len : {len(request.features)}",
+        )
 
-        print(f"session_id : {request.session_id}")
-        print(f"user_id : {request.user_id}")
-        print(f"timestamp : {request.timestamp}")
-        print(f"face_detected : {request.face_detected}")
-        print(f"bbox : x1={bbox.x1}, y1={bbox.y1}, x2={bbox.x2}, y2={bbox.y2}")
-        print(f"tensor_shape : {list(request.tensor_shape)}")
-        print(f"features_len : {len(request.features)}")
+    def _log_response_header(self, rpc_name: str):
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[RESPONSE] {rpc_name} | {now}",
+            "=" * 80,
+        )
 
     def HealthCheck(self, request, context):
-        return interview_pb2.HealthResponse(
+        response = interview_pb2.HealthResponse(
             status="ok",
             model_path=MODEL_PATH,
             question_client_status="enabled" if self.question_client else "disabled",
-            voice_tone_analyzer_status="enabled" if self.voice_tone_analyzer else "disabled",
+            voice_tone_analyzer_status="enabled"
+            if self.voice_tone_analyzer
+            else "disabled",
             report_client_status="enabled" if self.report_client else "disabled",
         )
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[RESPONSE] HealthCheck | {now}",
+            "=" * 80,
+            f"status : {response.status}",
+            f"model_path : {response.model_path}",
+            f"question_client_status : {response.question_client_status}",
+            f"voice_tone_analyzer_status : {response.voice_tone_analyzer_status}",
+            f"report_client_status : {response.report_client_status}",
+        )
+        return response
 
     def AnalyzeFrame(self, request, context):
         self._log_feature_request("AnalyzeFrame", request)
-        return self._analyze(request)
+        response = self._analyze(request)
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[RESPONSE] AnalyzeFrame | {now}",
+            "=" * 80,
+            f"label : {response.label}",
+            f"confidence : {response.confidence:.4f}",
+            f"feedback : {response.feedback}",
+        )
+        return response
 
     def AnalyzeFrameStream(self, request_iterator, context):
         for request in request_iterator:
             self._log_feature_request("AnalyzeFrameStream", request)
-            yield self._analyze(request)
+            response = self._analyze(request)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._synchronized_print(
+                "\n" + "=" * 80,
+                f"[RESPONSE] AnalyzeFrameStream | {now}",
+                "=" * 80,
+                f"label : {response.label}",
+                f"confidence : {response.confidence:.4f}",
+                f"feedback : {response.feedback}",
+            )
+            yield response
 
     def GenerateInitialQuestions(self, request, context):
         self._log_request_header("GenerateInitialQuestions")
 
         if self.question_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-            context.set_details("Question generation is disabled. Set GEMINI_API_KEY in .env.")
+            context.set_details(
+                "Question generation is disabled. Set GEMINI_API_KEY in .env."
+            )
             return interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
@@ -228,17 +291,28 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 language=request.language,
             )
 
-            return interview_pb2.InitialQuestionGenerateResponse(
+            response = interview_pb2.InitialQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 questions=[
-                    self._to_proto_question_item(item)
-                    for item in result.questions
+                    self._to_proto_question_item(item) for item in result.questions
                 ],
             )
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            log_lines = [
+                "\n" + "=" * 80,
+                f"[RESPONSE] GenerateInitialQuestions | {now}",
+                "=" * 80,
+                f"questions_count : {len(response.questions)}",
+            ]
+            for i, q in enumerate(response.questions):
+                log_lines.append(f"  Q{i + 1}: {q.question}")
+            self._synchronized_print(*log_lines)
+            return response
 
         except Exception as exc:
-            print(f"[ERROR] Initial question generation failed: {exc}")
+            with self._log_lock:
+                print(f"[ERROR] Initial question generation failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Initial question generation failed: {exc}")
 
@@ -253,7 +327,9 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
         if self.question_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-            context.set_details("Question generation is disabled. Set GEMINI_API_KEY in .env.")
+            context.set_details(
+                "Question generation is disabled. Set GEMINI_API_KEY in .env."
+            )
             return interview_pb2.FollowUpQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
@@ -280,14 +356,23 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 language=request.language,
             )
 
-            return interview_pb2.FollowUpQuestionGenerateResponse(
+            response = interview_pb2.FollowUpQuestionGenerateResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 question=self._to_proto_question_item(result.question),
             )
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._synchronized_print(
+                "\n" + "=" * 80,
+                f"[RESPONSE] GenerateFollowUpQuestion | {now}",
+                "=" * 80,
+                f"question : {response.question.question}",
+            )
+            return response
 
         except Exception as exc:
-            print(f"[ERROR] Follow-up question generation failed: {exc}")
+            with self._log_lock:
+                print(f"[ERROR] Follow-up question generation failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Follow-up question generation failed: {exc}")
 
@@ -297,12 +382,17 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             )
 
     def AnalyzeVoiceTone(self, request, context):
-        self._log_request_header("AnalyzeVoiceTone")
-        print(f"session_id : {request.session_id}")
-        print(f"user_id : {request.user_id}")
-        print(f"question_index : {request.question_index}")
-        print(f"response_time_seconds : {request.response_time_seconds}")
-        print(f"zcr_samples_count : {len(request.zcr_samples)}")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[REQUEST] AnalyzeVoiceTone | {now}",
+            "=" * 80,
+            f"session_id : {request.session_id}",
+            f"user_id : {request.user_id}",
+            f"question_index : {request.question_index}",
+            f"response_time_seconds : {request.response_time_seconds}",
+            f"zcr_samples_count : {len(request.zcr_samples)}",
+        )
 
         if self.voice_tone_analyzer is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
@@ -320,13 +410,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 response_time_seconds=request.response_time_seconds,
             )
 
-            print(f"[VOICE] pitch_stability    : {result.pitch_stability:.2f}")
-            print(f"[VOICE] energy_stability   : {result.energy_stability:.2f}")
-            print(f"[VOICE] pause_ratio        : {result.pause_ratio:.3f}")
-            print(f"[VOICE] overall_score      : {result.overall_stability_score:.2f}")
-            print(f"[VOICE] feedback           : {result.feedback}")
-
-            return interview_pb2.VoiceToneAnalysisResponse(
+            response = interview_pb2.VoiceToneAnalysisResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 pitch_mean=result.pitch_mean,
@@ -341,9 +425,22 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 overall_stability_score=result.overall_stability_score,
                 feedback=result.feedback,
             )
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._synchronized_print(
+                "\n" + "=" * 80,
+                f"[RESPONSE] AnalyzeVoiceTone | {now}",
+                "=" * 80,
+                f"pitch_stability    : {response.pitch_stability:.2f}",
+                f"energy_stability   : {response.energy_stability:.2f}",
+                f"pause_ratio        : {response.pause_ratio:.3f}",
+                f"overall_score      : {response.overall_stability_score:.2f}",
+                f"feedback           : {response.feedback}",
+            )
+            return response
 
         except Exception as exc:
-            print(f"[ERROR] Voice tone analysis failed: {exc}")
+            with self._log_lock:
+                print(f"[ERROR] Voice tone analysis failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Voice tone analysis failed: {exc}")
             return interview_pb2.VoiceToneAnalysisResponse(
@@ -353,14 +450,21 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
             )
 
     def GenerateFinalReport(self, request, context):
-        self._log_request_header("GenerateFinalReport")
-        print(f"session_id : {request.session_id}")
-        print(f"user_id : {request.user_id}")
-        print(f"question_results_count : {len(request.question_results)}")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._synchronized_print(
+            "\n" + "=" * 80,
+            f"[REQUEST] GenerateFinalReport | {now}",
+            "=" * 80,
+            f"session_id : {request.session_id}",
+            f"user_id : {request.user_id}",
+            f"question_results_count : {len(request.question_results)}",
+        )
 
         if self.report_client is None:
             context.set_code(grpc.StatusCode.FAILED_PRECONDITION)
-            context.set_details("Report generation is disabled. Set GEMINI_API_KEY in .env.")
+            context.set_details(
+                "Report generation is disabled. Set GEMINI_API_KEY in .env."
+            )
             return interview_pb2.FinalReportResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
@@ -396,18 +500,23 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                         response_time_seconds=response_time_seconds,
                         transcript_is_placeholder=answer_is_placeholder,
                     )
-                    print(
-                        f"[VOICE] Q{qa.index}"
-                        f"  pitch={voice_result.pitch_stability:.2f}"
-                        f"  energy={voice_result.energy_stability:.2f}"
-                        f"  pause={voice_result.pause_ratio:.3f}"
-                        f"  score={voice_result.overall_stability_score:.2f}"
-                    )
+                    with self._log_lock:
+                        print(
+                            f"[VOICE] Q{qa.index}"
+                            f"  pitch={voice_result.pitch_stability:.2f}"
+                            f"  energy={voice_result.energy_stability:.2f}"
+                            f"  pause={voice_result.pause_ratio:.3f}"
+                            f"  score={voice_result.overall_stability_score:.2f}"
+                        )
 
                 voice_stability_score = (
-                    voice_result.overall_stability_score if voice_result else qa.voice_score
+                    voice_result.overall_stability_score
+                    if voice_result
+                    else qa.voice_score
                 )
-                voice_feedback = voice_result.feedback if voice_result else qa.voice_feedback
+                voice_feedback = (
+                    voice_result.feedback if voice_result else qa.voice_feedback
+                )
                 voice_scores.append(voice_stability_score)
                 zcr_samples = [round(float(sample), 5) for sample in qa.zcr_samples]
                 effective_answer = "" if answer_is_placeholder else qa.answer
@@ -417,34 +526,42 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                     else getattr(qa, "answer_length", 0) or len(qa.answer)
                 )
 
-                question_results.append({
-                    "index": qa.index,
-                    "question": qa.question,
-                    "answer": effective_answer,
-                    "raw_answer": qa.answer,
-                    "answer_is_placeholder": answer_is_placeholder,
-                    "transcript_status": (
-                        "placeholder_no_transcript"
-                        if answer_is_placeholder
-                        else "transcribed"
-                    ),
-                    "follow_up_question": qa.follow_up_question,
-                    "subtitle_summary": qa.subtitle_summary,
-                    "answer_length": answer_length,
-                    "response_time_seconds": response_time_seconds,
-                    "voice_score": voice_stability_score,
-                    "expression_score": qa.expression_score,
-                    "total_score": qa.total_score,
-                    "voice_feedback": voice_feedback,
-                    "expression_feedback": qa.expression_feedback,
-                    "emotion_result_json": getattr(qa, "emotion_result_json", ""),
-                    "audio_summary": _audio_summary_to_dict(qa.audio_summary),
-                    "zcr_samples": zcr_samples,
-                    "zcr_stats": _zcr_stats(zcr_samples),
-                    "pitch_stability": voice_result.pitch_stability if voice_result else None,
-                    "energy_stability": voice_result.energy_stability if voice_result else None,
-                    "pause_ratio": voice_result.pause_ratio if voice_result else None,
-                })
+                question_results.append(
+                    {
+                        "index": qa.index,
+                        "question": qa.question,
+                        "answer": effective_answer,
+                        "raw_answer": qa.answer,
+                        "answer_is_placeholder": answer_is_placeholder,
+                        "transcript_status": (
+                            "placeholder_no_transcript"
+                            if answer_is_placeholder
+                            else "transcribed"
+                        ),
+                        "follow_up_question": qa.follow_up_question,
+                        "subtitle_summary": qa.subtitle_summary,
+                        "answer_length": answer_length,
+                        "response_time_seconds": response_time_seconds,
+                        "voice_score": voice_stability_score,
+                        "expression_score": qa.expression_score,
+                        "total_score": qa.total_score,
+                        "voice_feedback": voice_feedback,
+                        "expression_feedback": qa.expression_feedback,
+                        "emotion_result_json": getattr(qa, "emotion_result_json", ""),
+                        "audio_summary": _audio_summary_to_dict(qa.audio_summary),
+                        "zcr_samples": zcr_samples,
+                        "zcr_stats": _zcr_stats(zcr_samples),
+                        "pitch_stability": voice_result.pitch_stability
+                        if voice_result
+                        else None,
+                        "energy_stability": voice_result.energy_stability
+                        if voice_result
+                        else None,
+                        "pause_ratio": voice_result.pause_ratio
+                        if voice_result
+                        else None,
+                    }
+                )
 
             timeline_scores = [
                 {
@@ -471,7 +588,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                 language=request.language or "ko-KR",
             )
 
-            return interview_pb2.FinalReportResponse(
+            response = interview_pb2.FinalReportResponse(
                 session_id=request.session_id,
                 user_id=request.user_id,
                 overall_summary=report.overall_summary,
@@ -513,9 +630,24 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
                     for q in report.question_feedbacks
                 ],
             )
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            response_json = MessageToJson(
+                response,
+                including_default_value_fields=True,
+                ensure_ascii=False,
+            )
+            log_lines = [
+                "\n" + "=" * 80,
+                f"[RESPONSE] GenerateFinalReport | {now}",
+                "=" * 80,
+                response_json,
+            ]
+            self._synchronized_print(*log_lines)
+            return response
 
         except Exception as exc:
-            print(f"[ERROR] Final report generation failed: {exc}")
+            with self._log_lock:
+                print(f"[ERROR] Final report generation failed: {exc}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(f"Final report generation failed: {exc}")
             return interview_pb2.FinalReportResponse(
@@ -579,23 +711,21 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
         confident_prob = float(probs[2])
 
         expression_score = (
-            nervous_prob * 35.0
-            + neutral_prob * 72.0
-            + confident_prob * 95.0
+            nervous_prob * 35.0 + neutral_prob * 72.0 + confident_prob * 95.0
         )
-
-        print(f"probs:{probs}", flush=True)
-        print(f"expression_score:{expression_score:.2f}", flush=True)
 
         pred_idx = int(np.argmax(probs))
         confidence = float(probs[pred_idx])
 
         label = CLASS_NAMES[pred_idx] if pred_idx < len(CLASS_NAMES) else str(pred_idx)
 
-        print("[MODEL DEBUG] logits:", logits[0].tolist())
-        print("[MODEL DEBUG] probs:", probs.tolist())
-        print("[MODEL DEBUG] pred_idx:", pred_idx)
-        print("[MODEL DEBUG] label:", label)
+        with self._log_lock:
+            print(f"probs:{probs}", flush=True)
+            print(f"expression_score:{expression_score:.2f}", flush=True)
+            print("[MODEL DEBUG] logits:", logits[0].tolist())
+            print("[MODEL DEBUG] probs:", probs.tolist())
+            print("[MODEL DEBUG] pred_idx:", pred_idx)
+            print("[MODEL DEBUG] label:", label)
 
         return interview_pb2.AnalysisResponse(
             session_id=request.session_id,
@@ -654,7 +784,7 @@ class InterviewAIService(interview_pb2_grpc.InterviewAIServiceServicer):
 
 
 def serve():
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=32))
 
     interview_pb2_grpc.add_InterviewAIServiceServicer_to_server(
         InterviewAIService(),

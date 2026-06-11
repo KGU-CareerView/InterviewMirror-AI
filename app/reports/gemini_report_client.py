@@ -28,11 +28,15 @@ class GeminiReportClient:
             "GEMINI_REPORT_FALLBACK_MODEL",
             DEFAULT_REPORT_FALLBACK_MODEL,
         )
+        self.timeout_ms = int(os.getenv("GEMINI_REPORT_TIMEOUT_MS", "120000"))
 
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is not set.")
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(
+            api_key=self.api_key,
+            http_options=types.HttpOptions(timeout=self.timeout_ms),
+        )
 
     def generate_final_report(
         self,
@@ -68,7 +72,9 @@ class GeminiReportClient:
             data = json.loads(response_text)
             return FinalInterviewReport.model_validate(data)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"Gemini report response is not valid JSON: {response_text}") from exc
+            raise ValueError(
+                f"Gemini report response is not valid JSON: {response_text}"
+            ) from exc
         except ValidationError as exc:
             raise ValueError(f"Invalid Gemini report response: {exc}") from exc
 
@@ -85,7 +91,10 @@ class GeminiReportClient:
                 config=config,
             )
         except errors.APIError as exc:
-            if not self._is_resource_exhausted(exc) or self.model == self.fallback_model:
+            if (
+                not self._is_resource_exhausted(exc)
+                or self.model == self.fallback_model
+            ):
                 raise
 
             print(
@@ -131,19 +140,30 @@ class GeminiReportClient:
 You are a senior AI interview diagnostician for a mock interview product.
 
 Generate a detailed and professional final interview report from the input data.
-The report must diagnose the candidate across four axes:
-1. Facial emotion and expression analysis:
-   - Use emotion_graph_json for the full-session expression trend.
-   - Use each question_results[].emotion_result_json for question-level signals.
-2. Answer content and accuracy:
+The report must diagnose the candidate across five distinct axes:
+
+1. EXPRESSION ANALYSIS (30% weight - INDEPENDENT from content and voice):
+   - Use ONLY emotion_graph_json and each question_results[].emotion_result_json for scoring.
+   - IGNORE the pre-computed expression_score field - recalculate based ONLY on emotion labels.
+   - Score stable_confident expressions significantly higher (80-100 range).
+   - Score neutral expressions moderately (60-75 range).
+   - Score nervous_anxious expressions lower (30-50 range).
+   - Analyze consistency and confidence throughout the interview.
+   - This score must be INDEPENDENT and NOT influenced by content_score or voice_score.
+
+2. ANSWER CONTENT EVALUATION (40% weight):
    - Use question, answer, category, interview_type, difficulty, and resume_text.
    - Evaluate relevance, specificity, logical structure, job fit, technical accuracy, and consistency.
    - If transcript_status is "placeholder_no_transcript" or answer_is_placeholder is true,
      treat the answer as missing. Do not evaluate raw_answer as user content.
+   - Provide separate content_feedback distinct from expression and voice feedback.
+
 3. Answer length and response time:
    - Use answer_length and response_time_seconds.
    - Diagnose whether the answer was too short, verbose, delayed, rushed, or well-paced.
-4. Voice analysis:
+   - Factor into overall question score but keep separate from content quality.
+
+4. VOICE ANALYSIS (30% weight):
    - Use voice_score as the precomputed reference score.
    - Use audio_summary, zcr_samples, pitch_stability, energy_stability, pause_ratio, and voice_feedback
      to explain speech stability, volume consistency, pauses, speed, filler tendency, and delivery confidence.
@@ -194,16 +214,34 @@ Return ONLY valid JSON with this exact structure:
   ]
 }}
 
+IMPORTANT: All score fields (overall_score, content_score, voice_score, expression_score, total_score) must be integers (0-100 range).
+Do not use decimal points. Round scores to the nearest integer.
+
 Scoring rules:
-- overall_score must be 0 to 100.
-- overall_score must synthesize content_score, voice_score, expression_score, and timing/length quality.
-- content_score must reflect answer completeness, relevance, specificity, and consistency.
+- All scores (overall_score, content_score, voice_score, expression_score, total_score, question scores) must be INTEGERS from 0 to 100.
+- Round all scores to the nearest integer. Do not use decimals or floating-point values.
+- overall_score must synthesize content_score (40%), voice_score (30%), expression_score (30%).
+- IMPORTANT: These three scores must be calculated INDEPENDENTLY:
+  * content_score: ONLY from answer text, question relevance, and resume fit. Ignore expression and voice.
+  * voice_score: ONLY from voice metrics (pitch_stability, energy_stability, pause_ratio, etc). Ignore content and expression.
+  * expression_score: ONLY from emotion_result_json and emotion_graph_json labels. Ignore content and voice.
+
+- content_score must reflect answer completeness, relevance, specificity, and consistency. Only evaluate actual transcribed answers.
+
 - voice_score must reflect pitch stability, energy stability, pause ratio, and speech flow.
-- expression_score must reflect facial expression stability, confidence, and nervousness signals.
+
+- expression_score must ONLY be based on emotion labels from emotion_result_json:
+  * stable_confident label → 80-100 (highest confidence and stability)
+  * neutral label → 60-75 (acceptable but less confident)
+  * nervous_anxious label → 30-50 (shows nervousness and lacks confidence)
+  * Compute question expression_score as average of all emotion labels in that question, round to integer.
+  * Compute session expression_score as average across all questions, round to integer.
+
 - Each question_feedbacks item must match one input question_results[].index.
-- Question total_score must synthesize content, voice, expression, answer length, and response time.
+- Question total_score = content_score (40%) + voice_score (30%) + expression_score (30%).
+
 - Do not invent facts that are not supported by the transcript, resume, or analysis metrics.
-- If a transcript is short or missing, lower content confidence and explain the limitation.
+- If a transcript is short or missing, lower content_score and explain the limitation in content_feedback.
 - Keep feedback concrete: mention observable evidence such as answer length, response time,
   speech_ratio, wpm, pause_count, filler_word_count, ttr, emotion labels, or score changes when available.
 - time_based_insights must mention specific time ranges when scores changed noticeably.

@@ -47,7 +47,7 @@ docker:
 	@echo "[docker] Building Docker image..."
 	docker build -t interview-ai .
 	@echo "[docker] Running Docker container..."
-	docker run --env-file .env -p 50051:50051 --name interview-ai interview-ai
+	docker run --env-file .env -p 50051:50051 --rm interview-ai
 
 clean:
 	@echo "[clean] Removing generated files..."
